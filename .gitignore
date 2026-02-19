@@ -1,0 +1,206 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+
+
+# Flutter/Dart
+.dart_tool/
+.packages
+build/
+*.dart.exp
+*.dart_tool
+.flutter-plugins
+.flutter-plugins-dependencies
+**.freezed.dart
+**.g.dart
+*.mocks.dart
+coverage/
+lib/generated_plugin_registrant.dart
+
+# Environment files
+.env
+*.env
+.env.local
+.env.production
+.env.development
+
+# IDE
+.idea/
+.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Android
+android/.gradle/
+android/app/.cxx/
+android/app/build/
+android/.idea/
+android/local.properties
+android/*.iml
+android/app/*.iml
+android/app/google-services.json
+android/app/src/debug/
+android/app/src/profile/
+
+# iOS
+ios/.generated/
+ios/Flutter/Flutter.podspec
+ios/Pods/
+ios/ServiceDefinitions.json
+ios/Runner/GeneratedPluginRegistrant.*
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/Generated.xcconfig
+ios/Flutter/AppFrameworkInfo.plist
+ios/Runner/Frameworks/
+ios/Runner/Profile.entitlements
+ios/Runner/Release.entitlements
+ios/Runner/DebugProfile.entitlements
+
+# Backend
+bingwa-pro-backend/node_modules/
+bingwa-pro-backend/dist/
+bingwa-pro-backend/.env
+bingwa-pro-backend/coverage/
+bingwa-pro-backend/.nyc_output/
+bingwa-pro-backend/*.log
+bingwa-pro-backend/npm-debug.log*
+bingwa-pro-backend/yarn-debug.log*
+bingwa-pro-backend/yarn-error.log*
+bingwa-pro-backend/lerna-debug.log*
+bingwa-pro-backend/.pnpm-debug.log*
+
+# Logs
+*.log
+**/logs/**
+**/log.txt
+
+# Test files
+test/
+**/*.test.dart
+**/*.spec.dart
+test-results/
+
+
+# Backend node_modules
+bingwa-pro-backend/node_modules/
+bingwa-pro-backend/node_modules/**
+bingwa-pro-backend/**/node_modules/
+
+# Backend build files
+bingwa-pro-backend/dist/
+bingwa-pro-backend/build/
+bingwa-pro-backend/coverage/
+
+# Environment files
+bingwa-pro-backend/.env
+bingwa-pro-backend/.env.*
+
+# ========== NODE MODULES (ALL LOCATIONS) ==========
+# Ignore node_modules anywhere in the project
+**/node_modules/
+**/node_modules/**
+node_modules/
+*/node_modules/
+*/*/node_modules/
+
+# ========== BACKEND SPECIFIC ==========
+bingwa-pro-backend/node_modules/
+bingwa-pro-backend/dist/
+bingwa-pro-backend/build/
+bingwa-pro-backend/coverage/
+bingwa-pro-backend/.env
+bingwa-pro-backend/.env.*
+bingwa-pro-backend/*.log
+
+# ========== FLUTTER/DART ==========
+.dart_tool/
+build/
+*.dart.exp
+*.freezed.dart
+*.g.dart
+*.mocks.dart
+coverage/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+
+# ========== IDE ==========
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ========== ANDROID ==========
+android/.gradle/
+android/app/.cxx/
+android/app/build/
+android/.idea/
+android/local.properties
+android/*.iml
+android/app/*.iml
+android/app/google-services.json
+
+# ========== IOS ==========
+ios/.generated/
+ios/Pods/
+ios/Runner/GeneratedPluginRegistrant.*
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+
+# ========== ENVIRONMENT FILES ==========
+.env
+.env.*
+*.env

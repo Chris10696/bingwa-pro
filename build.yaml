@@ -1,0 +1,13 @@
+targets:
+  $default:
+    builders:
+      freezed:
+        generate_for:
+          include:
+            - lib/**/*.dart  # Include ALL dart files
+            - lib/features/wallet/presentation/providers/wallet_provider.dart
+          exclude:
+            - lib/**/*.g.dart  # Exclude already generated files
+            - lib/**/*.freezed.dart  # Exclude freezed generated files
+        options:
+          union_value_case: pascal
