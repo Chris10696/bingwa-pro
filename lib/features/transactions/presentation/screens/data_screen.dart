@@ -105,7 +105,14 @@ class _DataScreenState extends ConsumerState<DataScreen> {
                     ),
                   ),
                   child: state.isSubmitting
-                      ? const ButtonLoadingIndicator()
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
                       : const Text(
                           'PROCEED TO TRANSACTION',
                           style: TextStyle(
@@ -162,7 +169,7 @@ class _DataScreenState extends ConsumerState<DataScreen> {
 
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
-          color: isSelected ? const Color(0xFF00C853).withAlpha(25) : null,
+          color: isSelected ? const Color(0xFF00C853).withOpacity(0.1) : null,
           child: ListTile(
             leading: Container(
               width: 40,
@@ -213,34 +220,30 @@ class _DataScreenState extends ConsumerState<DataScreen> {
     IconData icon;
     String status;
 
-    switch (health.status) {
-      case UssdStatus.green:
-        color = Colors.green;
-        icon = Icons.check_circle;
-        status = 'System Normal';
-        break;
-      case UssdStatus.yellow:
-        color = Colors.orange;
-        icon = Icons.warning;
-        status = 'Degraded Performance';
-        break;
-      case UssdStatus.red:
-        color = Colors.red;
-        icon = Icons.error;
-        status = 'System Issues';
-        break;
-      default:
-        color = Colors.grey;
-        icon = Icons.help;
-        status = 'Unknown';
+    if (health.status == UssdStatus.green) {
+      color = Colors.green;
+      icon = Icons.check_circle;
+      status = 'System Normal';
+    } else if (health.status == UssdStatus.yellow) {
+      color = Colors.orange;
+      icon = Icons.warning;
+      status = 'Degraded Performance';
+    } else if (health.status == UssdStatus.red) {
+      color = Colors.red;
+      icon = Icons.error;
+      status = 'System Issues';
+    } else {
+      color = Colors.grey;
+      icon = Icons.help;
+      status = 'Unknown';
     }
 
     return Container(
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
-        color: color.withAlpha(25),
+        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withAlpha(75)),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Row(
         children: [

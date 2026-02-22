@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:bingwa_pro/shared/models/transaction_model.dart'; // ADD THIS IMPORT
+import 'package:bingwa_pro/shared/models/transaction_model.dart';
 import '../../../../core/widgets/loading_indicator.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
 import '../../../../core/utils/validators.dart';
 import '../../../../core/utils/formatters.dart';
-import '../providers/transaction_execution_provider.dart'; // CHANGED FROM transaction_provider.dart
+import '../providers/transaction_execution_provider.dart';
 
 class AirtimeScreen extends ConsumerStatefulWidget {
   const AirtimeScreen({super.key});
@@ -31,8 +31,8 @@ class _AirtimeScreenState extends ConsumerState<AirtimeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(transactionExecutionProvider); // CHANGED PROVIDER
-    final notifier = ref.read(transactionExecutionProvider.notifier); // CHANGED PROVIDER
+    final state = ref.watch(transactionExecutionProvider);
+    final notifier = ref.read(transactionExecutionProvider.notifier);
 
     if (state.isLoading && state.availableProducts == null) {
       return const Scaffold(
@@ -128,7 +128,14 @@ class _AirtimeScreenState extends ConsumerState<AirtimeScreen> {
                     ),
                   ),
                   child: state.isSubmitting
-                      ? const CircularProgressIndicator(color: Colors.white) // CHANGED FROM ButtonLoadingIndicator
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
                       : const Text(
                           'PROCEED TO TRANSACTION',
                           style: TextStyle(
@@ -224,26 +231,22 @@ class _AirtimeScreenState extends ConsumerState<AirtimeScreen> {
     IconData icon;
     String status;
 
-    switch (health.status) {
-      case UssdStatus.green:
-        color = Colors.green;
-        icon = Icons.check_circle;
-        status = 'System Normal';
-        break;
-      case UssdStatus.yellow:
-        color = Colors.orange;
-        icon = Icons.warning;
-        status = 'Degraded Performance';
-        break;
-      case UssdStatus.red:
-        color = Colors.red;
-        icon = Icons.error;
-        status = 'System Issues';
-        break;
-      default:
-        color = Colors.grey;
-        icon = Icons.help;
-        status = 'Unknown';
+    if (health.status == UssdStatus.green) {
+      color = Colors.green;
+      icon = Icons.check_circle;
+      status = 'System Normal';
+    } else if (health.status == UssdStatus.yellow) {
+      color = Colors.orange;
+      icon = Icons.warning;
+      status = 'Degraded Performance';
+    } else if (health.status == UssdStatus.red) {
+      color = Colors.red;
+      icon = Icons.error;
+      status = 'System Issues';
+    } else {
+      color = Colors.grey;
+      icon = Icons.help;
+      status = 'Unknown';
     }
 
     return Container(

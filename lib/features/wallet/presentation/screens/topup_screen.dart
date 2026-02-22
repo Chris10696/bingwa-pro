@@ -33,7 +33,6 @@ class TopUpScreen extends ConsumerStatefulWidget {
 class _TopUpScreenState extends ConsumerState<TopUpScreen> {
   final _amountController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
-  // Removed _selectedMethod as it's not used
 
   @override
   void initState() {
@@ -117,7 +116,14 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
                           ),
                         ),
                         child: state.isPurchasingTokens
-                            ? const ButtonLoadingIndicator()
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
                             : const Text(
                                 'PROCEED TO PAYMENT',
                                 style: TextStyle(
@@ -153,20 +159,6 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
         );
       }).toList(),
     );
-  }
-
-  IconData _getPaymentMethodIcon(String type) {
-    switch (type) {
-      case 'MPESA_TILL':
-      case 'MPESA_PAYBILL':
-        return Icons.phone_android;
-      case 'AIRTIME':
-        return Icons.phone;
-      case 'BANK_TRANSFER':
-        return Icons.account_balance;
-      default:
-        return Icons.payment;
-    }
   }
 
   void _proceedToPayment(WalletState state, WalletNotifier notifier) {
@@ -322,7 +314,6 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
       (t) => t.id == transactionId,
     );
 
-    // Handle null case
     if (transaction == null) {
       _showTransactionNotFoundDialog();
       return;
@@ -475,7 +466,6 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
   }
 }
 
-// New widget to handle the updated Radio API
 class _PaymentMethodRadio extends StatelessWidget {
   final PaymentMethod method;
   final bool isSelected;
@@ -501,13 +491,14 @@ class _PaymentMethodRadio extends StatelessWidget {
                 onSelected(value);
               }
             },
+            activeColor: const Color(0xFF00C853),
           ),
           const SizedBox(width: 12),
           Container(
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: const Color(0xFF00C853).withAlpha(25),
+              color: const Color(0xFF00C853).withOpacity(0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(

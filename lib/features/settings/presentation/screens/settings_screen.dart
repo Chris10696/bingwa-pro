@@ -302,8 +302,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     color: const Color.fromARGB(25, 0, 200, 83),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(
-                    (agent?.status as String?) ?? 'ACTIVE',
+                 child: Text(
+                  agent?.status.toString().split('.').last ?? 'ACTIVE',
                     style: const TextStyle(
                       fontSize: 12,
                       color: Color(0xFF00C853),

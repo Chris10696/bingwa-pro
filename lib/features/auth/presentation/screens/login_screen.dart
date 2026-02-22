@@ -17,6 +17,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _obscurePin = true;
 
   @override
+  void initState() {
+    super.initState();
+    // Add a listener to handle navigation when auth state changes
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.listenManual(authNotifierProvider, (previous, next) {
+        if (next.isAuthenticated && mounted) {
+          if (next.requiresBiometricSetup) {
+            context.push('/biometric-setup');
+          } else {
+            context.go('/dashboard');
+          }
+        } else if (next.errorMessage != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(next.errorMessage!),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
+      });
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final state = ref.watch(authNotifierProvider);
     final notifier = ref.read(authNotifierProvider.notifier);
@@ -131,7 +159,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       const SizedBox(height: 30),
                       // Login Button
-                      // Login Button
                       SizedBox(
                         width: double.infinity,
                         height: 50,
@@ -140,32 +167,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   state.pin.isValid &&
                                   !state.status.isInProgress
                               ? () async {
-                                  // Call login
+                                  // Just call login - navigation handled by listener
                                   await notifier.login();
-                                  
-                                  // Check result after login
-                                  if (mounted) {
-                                    if (state.isAuthenticated) {
-                                      if (state.requiresBiometricSetup) {
-                                        context.push('/biometric-setup');
-                                      } else {
-                                        // Use go_router to navigate to dashboard
-                                        context.go('/dashboard');
-                                      }
-                                    } else if (state.errorMessage != null) {
-                                      // Show error in snackbar for better visibility
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(state.errorMessage!),
-                                          backgroundColor: Colors.red,
-                                          behavior: SnackBarBehavior.floating,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  }
                                 }
                               : null,
                           style: ElevatedButton.styleFrom(

@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { Agent } from './agents/entities/agent.entity';
-import { Wallet } from './wallets/entities/wallet.entity';
+import { AgentsModule } from './agents/agents.module';
 import { AuthModule } from './auth/auth.module';
+import { WalletsModule } from './wallets/wallets.module';
+import { TransactionsModule } from './transactions/transactions.module';
+import { ProductsModule } from './products/products.module'; // Add this
 
 @Module({
   imports: [
@@ -20,11 +22,15 @@ import { AuthModule } from './auth/auth.module';
         username: configService.get('DB_USER'),
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_NAME'),
-        entities: [Agent, Wallet],
-        synchronize: true, // Keep true for development
+        entities: [__dirname + '/**/*.entity{.ts,.js}'],
+        synchronize: true, // Set to false in production
       }),
     }),
-    AuthModule, // Add this line
+    AgentsModule,
+    AuthModule,
+    WalletsModule,
+    TransactionsModule,
+    ProductsModule, // Add this
   ],
 })
 export class AppModule {}

@@ -8,12 +8,19 @@ class NetworkInfo {
   
   Future<bool> get isConnected async {
     final connectivityResult = await _connectivity.checkConnectivity();
-    return connectivityResult != ConnectivityResult.none;
-  }
+    
+    // In newer versions, connectivityResult is always a List
+    // We need to check if any connection type is available
+    return connectivityResult.isNotEmpty && 
+           !connectivityResult.contains(ConnectivityResult.none);
+    }
   
   Future<List<ConnectivityResult>> get connectivityStatus async {
-    return await _connectivity.checkConnectivity();
-  }
+    final result = await _connectivity.checkConnectivity();
+    
+    // In newer versions, result is already a List
+    return result;
+    }
   
   Stream<List<ConnectivityResult>> get onConnectivityChanged {
     return _connectivity.onConnectivityChanged;

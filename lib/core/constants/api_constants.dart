@@ -1,7 +1,7 @@
 class ApiConstants {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'API_BASE_URL',
+    defaultValue: 'http://192.168.100.8:3000',
   );
   
   // Auth Endpoints
@@ -14,15 +14,15 @@ class ApiConstants {
   
   // Agent Endpoints
   static const String agentProfile = '/agents/me';
-  static const String updateProfile = '/agents/update';
+  static const String updateProfile = '/agents/profile';
   static const String agentStats = '/agents/stats';
   
   // Wallet Endpoints
   static const String walletBalance = '/wallet/balance';
   static const String walletTransactions = '/wallet/transactions';
-  static const String purchaseTokens = '/wallet/purchase';
+  static const String purchaseTokens = '/wallet/credit'; // Changed
   static const String initiateMpesa = '/wallet/mpesa/initiate';
-  static const String confirmPayment = '/wallet/payment/confirm';
+  static const String confirmPayment = '/wallet/confirm';
   
   // Transaction Endpoints
   static const String airtime = '/transactions/airtime';

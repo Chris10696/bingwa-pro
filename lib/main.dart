@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart'; // Add this import
 import 'app_router.dart';
 import 'core/utils/session_manager.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
+import 'core/security/secure_storage_manager.dart';
 
 Future<void> main() async {
   // Load environment variables
@@ -12,6 +13,9 @@ Future<void> main() async {
   
   // Initialize Flutter
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize secure storage
+  await SecureStorageManager.initialize();
   
   // TODO: Initialize other services (Firebase, Sentry, etc.)
   

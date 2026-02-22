@@ -16,6 +16,13 @@ import 'package:bingwa_pro/features/transactions/presentation/screens/sms_screen
 import 'package:bingwa_pro/features/transactions/presentation/screens/transaction_history_screen.dart';
 import 'package:bingwa_pro/features/wallet/presentation/screens/topup_screen.dart';
 import 'package:bingwa_pro/features/wallet/presentation/screens/wallet_screen.dart';
+
+// ========== NEW SCREEN IMPORTS ==========
+import 'package:bingwa_pro/features/offers/presentation/screens/offers_screen.dart';
+import 'package:bingwa_pro/features/customers/presentation/screens/customers_screen.dart';
+import 'package:bingwa_pro/features/reports/presentation/screens/reports_screen.dart';
+import 'package:bingwa_pro/features/help/presentation/screens/help_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -39,6 +46,12 @@ class AppRoutes {
   static const String transactionHistory = '/transaction-history';
   static const String settings = '/settings';
   static const String profile = '/profile';
+  
+  // ========== NEW ROUTES ==========
+  static const String offers = '/offers';
+  static const String customers = '/customers';
+  static const String reports = '/reports';
+  static const String help = '/help';
   
   // Root paths
   static const String root = '/';
@@ -131,11 +144,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return AppRoutes.dashboard;
         }
         
+        // ========== TEMPORARILY BYPASS BIOMETRIC CHECK ==========
+        // Commented out until biometric is properly implemented
+        /*
         // Check biometric requirement for sensitive routes
         final sensitiveRoutes = [AppRoutes.wallet, AppRoutes.topUp, AppRoutes.transactionHistory];
         if (sensitiveRoutes.contains(location) && !hasBiometric) {
           return AppRoutes.biometricSetup;
         }
+        */
         
         return null;
       } catch (e) {
@@ -255,6 +272,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       
+      // ========== TRANSACTION ROUTES ==========
       GoRoute(
         path: AppRoutes.airtime,
         name: 'airtime',
@@ -307,6 +325,60 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       
+      // ========== NEW FEATURE ROUTES ==========
+      GoRoute(
+        path: AppRoutes.offers,
+        name: 'offers',
+        pageBuilder: (context, state) {
+          return CustomTransitionPage<void>(
+            key: state.pageKey,
+            child: const OffersScreen(),
+            transitionsBuilder: AppTransitions.slideTransition,
+            transitionDuration: const Duration(milliseconds: 350),
+          );
+        },
+      ),
+      
+      GoRoute(
+        path: AppRoutes.customers,
+        name: 'customers',
+        pageBuilder: (context, state) {
+          return CustomTransitionPage<void>(
+            key: state.pageKey,
+            child: const CustomersScreen(),
+            transitionsBuilder: AppTransitions.slideTransition,
+            transitionDuration: const Duration(milliseconds: 350),
+          );
+        },
+      ),
+      
+      GoRoute(
+        path: AppRoutes.reports,
+        name: 'reports',
+        pageBuilder: (context, state) {
+          return CustomTransitionPage<void>(
+            key: state.pageKey,
+            child: const ReportsScreen(),
+            transitionsBuilder: AppTransitions.slideTransition,
+            transitionDuration: const Duration(milliseconds: 350),
+          );
+        },
+      ),
+      
+      GoRoute(
+        path: AppRoutes.help,
+        name: 'help',
+        pageBuilder: (context, state) {
+          return CustomTransitionPage<void>(
+            key: state.pageKey,
+            child: const HelpScreen(),
+            transitionsBuilder: AppTransitions.slideTransition,
+            transitionDuration: const Duration(milliseconds: 350),
+          );
+        },
+      ),
+      
+      // ========== SETTINGS AND PROFILE ==========
       GoRoute(
         path: AppRoutes.settings,
         name: 'settings',
@@ -406,6 +478,12 @@ extension GoRouterExtension on BuildContext {
   void goToTransactionHistory() => go(AppRoutes.transactionHistory);
   void goToSettings() => go(AppRoutes.settings);
   void goToProfile() => go(AppRoutes.profile);
+  
+  // ========== NEW NAVIGATION METHODS ==========
+  void goToOffers() => go(AppRoutes.offers);
+  void goToCustomers() => go(AppRoutes.customers);
+  void goToReports() => go(AppRoutes.reports);
+  void goToHelp() => go(AppRoutes.help);
   
   // Replace navigation (no back button)
   void replaceWithDashboard() => go(AppRoutes.dashboard);
