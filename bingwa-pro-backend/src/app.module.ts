@@ -1,15 +1,21 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AgentsModule } from './agents/agents.module';
 import { AuthModule } from './auth/auth.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { ProductsModule } from './products/products.module';
-import { UssdModule } from './ussd/ussd.module'; // Add this
+import { UssdModule } from './ussd/ussd.module';
+import { MpesaModule } from './mpesa/mpesa.module'; // Add this
 
 @Module({
   imports: [
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
+      limit: 100,
+    }]),
     ConfigModule.forRoot({
       isGlobal: true,
     }),
@@ -32,7 +38,8 @@ import { UssdModule } from './ussd/ussd.module'; // Add this
     WalletsModule,
     TransactionsModule,
     ProductsModule,
-    UssdModule, // Add this
+    UssdModule,
+    MpesaModule, // Add this
   ],
 })
 export class AppModule {}

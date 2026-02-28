@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DeepPartial } from 'typeorm'; // CHANGE 1: Added DeepPartial
 import { HttpService } from '@nestjs/axios';
 import { UssdRoute, UssdRouteStatus, UssdProcessingMode } from './entities/ussd-route.entity';
 import { UssdSession, UssdSessionStatus } from './entities/ussd-session.entity';
@@ -36,7 +36,7 @@ export class UssdService {
       // Get the USSD route
       const route = await this.ussdRouteRepository.findOne({
         where: { code: routeCode, isActive: true },
-      }) as UssdRoute | null;
+      });
 
       if (!route) {
         throw new NotFoundException(`USSD route ${routeCode} not found or inactive`);
@@ -76,7 +76,7 @@ export class UssdService {
         session = await this.ussdSessionRepository.findOne({
           where: { sessionId },
           relations: ['route'],
-        }) as UssdSession | null;
+        });
 
         if (!session) {
           throw new NotFoundException('USSD session not found');
@@ -347,7 +347,7 @@ export class UssdService {
 
   async getHealthStatus(): Promise<UssdHealthDto> {
     try {
-      const routes = await this.ussdRouteRepository.find() as UssdRoute[];
+      const routes = await this.ussdRouteRepository.find();
       
       const totalChecks = routes.reduce((sum, r) => sum + (r.successCount || 0) + (r.failureCount || 0), 0);
       const failedChecks = routes.reduce((sum, r) => sum + (r.failureCount || 0), 0);
@@ -403,15 +403,15 @@ export class UssdService {
     // Check for existing route
     const existingRoute = await this.ussdRouteRepository.findOne({
       where: { code: createRouteDto.code },
-    }) as UssdRoute | null;
+    });
 
     if (existingRoute) {
       throw new BadRequestException(`Route with code ${createRouteDto.code} already exists`);
     }
 
-    // Create and save new route
-    const newRoute = this.ussdRouteRepository.create(createRouteDto);
-    const savedRoute = await this.ussdRouteRepository.save(newRoute) as UssdRoute;
+    // CHANGE 2: Cast createRouteDto to DeepPartial<UssdRoute> to force single-entity overload
+    const newRoute = this.ussdRouteRepository.create(createRouteDto as DeepPartial<UssdRoute>);
+    const savedRoute = await this.ussdRouteRepository.save(newRoute);
     return savedRoute;
   }
 
@@ -421,7 +421,7 @@ export class UssdService {
   async findAllRoutes(): Promise<UssdRoute[]> {
     const routes = await this.ussdRouteRepository.find({
       order: { createdAt: 'DESC' },
-    }) as UssdRoute[];
+    });
     return routes;
   }
 
@@ -431,7 +431,7 @@ export class UssdService {
   async findOneRoute(id: string): Promise<UssdRoute> {
     const route = await this.ussdRouteRepository.findOne({
       where: { id },
-    }) as UssdRoute | null;
+    });
 
     if (!route) {
       throw new NotFoundException(`Route with ID ${id} not found`);
@@ -451,7 +451,7 @@ export class UssdService {
     Object.assign(existingRoute, updateData);
     
     // Save and return
-    const updatedRoute = await this.ussdRouteRepository.save(existingRoute) as UssdRoute;
+    const updatedRoute = await this.ussdRouteRepository.save(existingRoute);
     return updatedRoute;
   }
 
@@ -469,7 +469,7 @@ export class UssdService {
   async toggleRouteStatus(id: string): Promise<UssdRoute> {
     const route = await this.findOneRoute(id);
     route.isActive = !route.isActive;
-    const updatedRoute = await this.ussdRouteRepository.save(route) as UssdRoute;
+    const updatedRoute = await this.ussdRouteRepository.save(route);
     return updatedRoute;
   }
 
@@ -482,14 +482,14 @@ export class UssdService {
     const anomalies = await this.ussdAnomalyRepository.find({
       where,
       order: { createdAt: 'DESC' },
-    }) as UssdAnomaly[];
+    });
     return anomalies;
   }
 
   async resolveAnomaly(id: string, resolution: { notes: string; resolvedBy: string }): Promise<UssdAnomaly> {
     const anomaly = await this.ussdAnomalyRepository.findOne({
       where: { id },
-    }) as UssdAnomaly | null;
+    });
 
     if (!anomaly) {
       throw new NotFoundException(`Anomaly with ID ${id} not found`);
@@ -500,7 +500,7 @@ export class UssdService {
     anomaly.resolvedBy = resolution.resolvedBy;
     anomaly.resolvedAt = new Date();
 
-    const resolvedAnomaly = await this.ussdAnomalyRepository.save(anomaly) as UssdAnomaly;
+    const resolvedAnomaly = await this.ussdAnomalyRepository.save(anomaly);
     return resolvedAnomaly;
   }
 
@@ -511,7 +511,7 @@ export class UssdService {
       where: { status: UssdSessionStatus.IN_PROGRESS },
       relations: ['route'],
       order: { createdAt: 'DESC' },
-    }) as UssdSession[];
+    });
     return sessions;
   }
 
@@ -524,7 +524,7 @@ export class UssdService {
       relations: ['route'],
       order: { createdAt: 'DESC' },
       take: limit,
-    }) as UssdSession[];
+    });
     return sessions;
   }
 }
