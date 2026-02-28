@@ -5,7 +5,8 @@ import { AgentsModule } from './agents/agents.module';
 import { AuthModule } from './auth/auth.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { TransactionsModule } from './transactions/transactions.module';
-import { ProductsModule } from './products/products.module'; // Add this
+import { ProductsModule } from './products/products.module';
+import { UssdModule } from './ussd/ussd.module'; // Add this
 
 @Module({
   imports: [
@@ -30,7 +31,8 @@ import { ProductsModule } from './products/products.module'; // Add this
     AuthModule,
     WalletsModule,
     TransactionsModule,
-    ProductsModule, // Add this
+    ProductsModule,
+    UssdModule, // Add this
   ],
 })
 export class AppModule {}
