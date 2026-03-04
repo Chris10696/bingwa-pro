@@ -240,9 +240,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           _formKey.currentState?.validate() == true
                       ? () async {
                           await notifier.register();
+                          
+                          if (!mounted) return;
+                          
                           if (state.isRegistering &&
-                              state.registrationToken != null &&
-                              mounted) {
+                              state.registrationToken != null) {
                             context.push('/verify-phone',
                                 extra: {
                                   'phone': _phoneController.text,
@@ -258,7 +260,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     ),
                   ),
                   child: state.status.isInProgress
-                      ? const ButtonLoadingIndicator()
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
                       : const Text(
                           'CREATE ACCOUNT',
                           style: TextStyle(
@@ -321,9 +330,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   void _showTermsDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => const AlertDialog(
-        title: Text('Terms and Conditions'),
-        content: SingleChildScrollView(
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Terms and Conditions'),
+        content: const SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -357,14 +366,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: null, // Will be set by showDialog
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Close'),
           ),
         ],
       ),
-    ).then((_) {
-      // Dialog closed
-    });
+    );
   }
 
   @override

@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.4.0 <4.0.0'  # Increased minimum SDK version
+  sdk: '>=3.8.0 <4.0.0'  # Increased minimum SDK version
   flutter: '>=3.19.0'
 
 dependencies:
@@ -49,14 +49,16 @@ dependencies:
   # Freezed for model generation
   freezed_annotation: ^3.1.0
   local_auth: ^3.0.0
+  json_annotation: ^4.11.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
   mockito: ^5.4.0
-  build_runner: ^2.10.5
+  build_runner: ^2.4.0
   freezed: ^3.2.4
+  json_serializable: ^6.7.0
   analyzer: ^9.0.0
 
 flutter:

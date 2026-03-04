@@ -15,10 +15,11 @@ class SecureStorageManager {
   // Storage version for migration
   static const int _currentStorageVersion = 1;
   static const String _storageVersionKey = 'storage_version';
-
   
+  // Biometric preference key
+  static const String _keyBiometricEnabled = 'biometric_enabled';
+
   // Initialize and check storage health
-    // Initialize and check storage health
   static Future<void> initialize() async {
     try {
       // Check if we need to migrate or repair storage
@@ -85,6 +86,7 @@ class SecureStorageManager {
         StorageConstants.deviceId,
         StorageConstants.encryptedPin,
         StorageConstants.biometricKey,
+        _keyBiometricEnabled,
       ];
       
       for (final key in keys) {
@@ -281,7 +283,7 @@ class SecureStorageManager {
     }
   }
   
-  // Check if biometric is enabled
+  // Check if biometric is enabled via key existence
   static Future<bool> hasBiometricEnabled() async {
     try {
       final biometricKey = await getBiometricKey();
@@ -291,9 +293,21 @@ class SecureStorageManager {
     }
   }
   
-  // Alternative name for compatibility
-  static Future<bool> getBiometricEnabled() async {
-    return await hasBiometricEnabled();
+  // Biometric preference methods (using separate key)
+  static Future<bool> getBiometricEnabled([bool defaultValue = false]) async {
+    try {
+      final value = await _safeRead(_keyBiometricEnabled);
+      if (value == null) return defaultValue;
+      return value == 'true';
+    } catch (e) {
+      AppLogger.e('Failed to get biometric enabled preference', e);
+      return defaultValue;
+    }
+  }
+  
+  static Future<void> setBiometricEnabled(bool enabled) async {
+    await _safeWrite(_keyBiometricEnabled, enabled.toString());
+    AppLogger.d('Biometric enabled preference set to: $enabled');
   }
   
   // Clear all storage (logout)
@@ -350,7 +364,7 @@ class SecureStorageManager {
     }
   }
   
-  // New method to check if user is authenticated via token
+  // Check if user is authenticated via token
   static Future<bool> isAuthenticated() async {
     return await isLoggedIn();
   }

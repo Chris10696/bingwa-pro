@@ -1,3 +1,4 @@
+import 'package:bingwa_pro/features/transactions/presentation/providers/transaction_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,11 +8,10 @@ import '../../../../core/widgets/loading_indicator.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/logger.dart';
+import '../../../../core/security/secure_storage_manager.dart';
 import '../providers/dashboard_provider.dart';
 // ========== ADD THESE IMPORT STATEMENTS ==========
-import '../../../../shared/models/transaction_model.dart'; // For TransactionDetails, TransactionStatus, TransactionType
-// UssdStatus and UssdHealthCheck are in transaction_model.dart
-// ProductBundle is also in transaction_model.dart
+import '../../../../shared/models/transaction_model.dart';
 // =================================================
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -141,7 +141,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
               color: Color(0xFF00C853),
             ),
           ),
-          // Menu Items
+          
+          // Main Menu Section
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Text(
+              'MAIN',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          
           ListTile(
             leading: const Icon(Icons.dashboard, color: Color(0xFF00C853)),
             title: const Text('Dashboard'),
@@ -162,7 +175,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
             title: const Text('Offers'),
             onTap: () {
               Navigator.pop(context);
-              context.push('/offers'); // FIXED: Added navigation
+              context.push('/offers');
             },
           ),
           ListTile(
@@ -170,26 +183,111 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
             title: const Text('Transaction History'),
             onTap: () {
               Navigator.pop(context);
-              context.push('/transaction-history'); // FIXED: Corrected path
+              context.push('/transaction-history');
+            },
+          ),
+          
+          const Divider(),
+          
+          // Tools Section
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Text(
+              'TOOLS',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          
+          ListTile(
+            leading: const Icon(Icons.speed, color: Colors.teal),
+            title: const Text('Quick Dial'),
+            subtitle: const Text('Manual repurchase for failed transactions'),
+            onTap: () {
+              Navigator.pop(context);
+              context.push('/quick-dial');
             },
           ),
           ListTile(
-            leading: const Icon(Icons.people, color: Colors.teal),
-            title: const Text('Customers'),
+            leading: const Icon(Icons.autorenew, color: Colors.indigo),
+            title: const Text('Auto Renewals'),
+            subtitle: const Text('Schedule recurring offers for clients'),
             onTap: () {
               Navigator.pop(context);
-              context.push('/customers'); // FIXED: Added navigation
+              context.push('/auto-renewals');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.link, color: Colors.lightBlue),
+            title: const Text('SiteLink'),
+            subtitle: const Text('Your webstore link'),
+            onTap: () {
+              Navigator.pop(context);
+              context.push('/sitelink');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.message, color: Colors.deepPurple),
+            title: const Text('Auto-Reply Messages'),
+            subtitle: const Text('Manage auto-reply triggers'),
+            onTap: () {
+              Navigator.pop(context);
+              context.push('/auto-reply');
+            },
+          ),
+          
+          const Divider(),
+          
+          // Management Section
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Text(
+              'MANAGEMENT',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          
+          ListTile(
+            leading: const Icon(Icons.people, color: Colors.teal),
+            title: const Text('Customers'),
+            subtitle: const Text('Manage your customers'),
+            onTap: () {
+              Navigator.pop(context);
+              context.push('/customers');
             },
           ),
           ListTile(
             leading: const Icon(Icons.bar_chart, color: Colors.indigo),
             title: const Text('Reports'),
+            subtitle: const Text('View analytics and reports'),
             onTap: () {
               Navigator.pop(context);
-              context.push('/reports'); // FIXED: Added navigation
+              context.push('/reports');
             },
           ),
+          
           const Divider(),
+          
+          // Support Section
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Text(
+              'SUPPORT',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          
           ListTile(
             leading: const Icon(Icons.settings, color: Colors.grey),
             title: const Text('Settings'),
@@ -203,7 +301,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
             title: const Text('Help & Support'),
             onTap: () {
               Navigator.pop(context);
-              context.push('/help'); // FIXED: Added navigation
+              context.push('/help');
             },
           ),
           const Divider(),
@@ -211,7 +309,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
             leading: const Icon(Icons.logout, color: Colors.red),
             title: const Text('Logout'),
             onTap: () {
-              _confirmLogout(context);
+              _confirmLogout();
             },
           ),
         ],
@@ -353,7 +451,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
           ),
           TextButton(
             onPressed: () {
-              _showHealthDetails(context, state.ussdHealth);
+              _showHealthDetails(state.ussdHealth);
             },
             child: const Text(
               'Details',
@@ -365,10 +463,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
     );
   }
   
-  void _showHealthDetails(BuildContext context, UssdHealthCheck? health) {
+  void _showHealthDetails(UssdHealthCheck? health) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('USSD System Health'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -386,7 +484,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Close'),
           ),
         ],
@@ -541,38 +639,38 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
               icon: Icons.phone_android,
               label: 'Airtime',
               color: Colors.green,
-              onTap: () => context.push('/airtime'), // FIXED: Removed /transactions prefix
+              onTap: () => context.push('/airtime'),
             ),
             _buildActionButton(
               icon: Icons.wifi,
               label: 'Data',
               color: Colors.blue,
-              onTap: () => context.push('/data'), // FIXED: Removed /transactions prefix
+              onTap: () => context.push('/data'),
             ),
             _buildActionButton(
               icon: Icons.message,
               label: 'SMS',
               color: Colors.purple,
-              onTap: () => context.push('/sms'), // FIXED: Removed /transactions prefix
+              onTap: () => context.push('/sms'),
             ),
             _buildActionButton(
               icon: Icons.account_balance_wallet,
               label: 'Top Up',
               color: Colors.orange,
-              onTap: () => context.push('/top-up'), // FIXED: Corrected path
+              onTap: () => context.push('/top-up'),
             ),
             _buildActionButton(
               icon: Icons.history,
               label: 'History',
               color: Colors.teal,
-              onTap: () => context.push('/transaction-history'), // FIXED: Corrected path
+              onTap: () => context.push('/transaction-history'),
             ),
             _buildActionButton(
               icon: Icons.qr_code,
               label: 'QR Pay',
               color: Colors.red,
               onTap: () {
-                _showQRPaymentDialog(context);
+                _showQRPaymentDialog();
               },
             ),
           ],
@@ -581,10 +679,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
     );
   }
   
-  void _showQRPaymentDialog(BuildContext context) {
+  void _showQRPaymentDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('QR Payment'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -614,7 +712,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Close'),
           ),
         ],
@@ -683,7 +781,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
               ),
             ),
             TextButton(
-              onPressed: () => context.push('/transaction-history'), // FIXED: Corrected path
+              onPressed: () => context.push('/transaction-history'),
               child: const Text(
                 'View All',
                 style: TextStyle(color: Color(0xFF00C853)),
@@ -783,16 +881,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
           ],
         ),
         onTap: () {
-          _showTransactionDetails(context, transaction);
+          _showTransactionDetails(transaction);
         },
       ),
     );
   }
   
-  void _showTransactionDetails(BuildContext context, TransactionDetails transaction) {
+  // FIXED: Implement retry logic (Line 921)
+  void _showTransactionDetails(TransactionDetails transaction) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text('Transaction Details'),
         content: SingleChildScrollView(
           child: Column(
@@ -805,6 +904,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
               _buildDetailRow('Customer', transaction.customerPhone),
               _buildDetailRow('Status', transaction.status.name.toUpperCase()),
               _buildDetailRow('Date', Formatters.formatDateTime(transaction.createdAt)),
+              if (transaction.completedAt != null)
+                _buildDetailRow('Completed', Formatters.formatDateTime(transaction.completedAt!)),
+              if (transaction.tokenAmount > 0)
+                _buildDetailRow('Tokens', transaction.tokenAmount.toString()),
+              if (transaction.commission > 0)
+                _buildDetailRow('Commission', Formatters.formatCurrency(transaction.commission)),
+              if (transaction.balanceAfter != null)
+                _buildDetailRow('Balance After', Formatters.formatCurrency(transaction.balanceAfter!)),
               if (transaction.errorMessage != null)
                 _buildDetailRow('Error', transaction.errorMessage!),
             ],
@@ -812,17 +919,64 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Close'),
           ),
           if (transaction.status == TransactionStatus.failed)
             ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                // TODO: Implement retry logic
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Retry feature coming soon')),
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                
+                // Show loading dialog
+                if (!mounted) return;
+                BuildContext? loadingContext;
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (ctx) {
+                    loadingContext = ctx;
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
+                  },
                 );
+                
+                // Execute retry
+                final success = await ref.read(transactionProvider.notifier)
+                    .retryTransaction(transaction.id);
+                
+                if (!mounted) return;
+                
+                // Close loading dialog
+                if (loadingContext != null) {
+                  Navigator.pop(loadingContext!);
+                }
+                
+                // Get updated state after retry
+                final txState = ref.read(transactionProvider);
+                
+                if (success != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(txState.retrySuccessMessage ?? 'Transaction retried successfully'),
+                      backgroundColor: Colors.green,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                  // Refresh dashboard data
+                  await ref.read(dashboardNotifierProvider.notifier).refresh();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(txState.retryError ?? 'Retry failed'),
+                      backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                }
+                
+                // Clear retry messages
+                ref.read(transactionProvider.notifier).clearRetryMessages();
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
@@ -914,39 +1068,39 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
       ),
       backgroundColor: const Color(0xFF00C853),
       onPressed: () {
-        _showProductDetails(context, product);
+        _showProductDetails(product);
       },
     );
   }
   
-  void _showProductDetails(BuildContext context, ProductBundle product) {
+  void _showProductDetails(ProductBundle product) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(product.name),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-        _buildDetailRow('Type', product.type.name.toUpperCase()),
-        _buildDetailRow('Value', product.value),
-        _buildDetailRow('Price', Formatters.formatCurrency(product.price)),
-        if (product.validityDays > 0)
-          _buildDetailRow('Validity', '${product.validityDays} days'),
-        if (product.description.isNotEmpty)
-          _buildDetailRow('Description', product.description),
-        _buildDetailRow('USSD Code', product.ussdCode),
-        _buildDetailRow('Network', product.network),
+            _buildDetailRow('Type', product.type.name.toUpperCase()),
+            _buildDetailRow('Value', product.value),
+            _buildDetailRow('Price', Formatters.formatCurrency(product.price)),
+            if (product.validityDays > 0)
+              _buildDetailRow('Validity', '${product.validityDays} days'),
+            if (product.description.isNotEmpty)
+              _buildDetailRow('Description', product.description),
+            _buildDetailRow('USSD Code', product.ussdCode),
+            _buildDetailRow('Network', product.network),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Close'),
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               // Navigate to appropriate purchase screen
               switch (product.type) {
                 case TransactionType.airtime:
@@ -959,9 +1113,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
                   context.push('/sms');
                   break;
                 default:
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Purchase screen coming soon')),
-                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Purchase screen coming soon')),
+                    );
+                  }
               }
             },
             style: ElevatedButton.styleFrom(
@@ -1197,28 +1353,31 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
     );
   }
   
-  void _confirmLogout(BuildContext context) {
+  void _confirmLogout() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Logout'),
         content: const Text('Are you sure you want to logout?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
-              // TODO: Implement proper logout with API call
+              Navigator.pop(dialogContext);
+              
+              // Log the event
               AppLogger.logSessionEvent(event: 'Manual logout from dashboard');
               
               // Clear local storage
-              // await SecureStorageManager.clearAll();
+              await SecureStorageManager.clearAll();
               
-              // Navigate to login
-              context.go('/login');
+              // Check if widget is still mounted before navigating
+              if (mounted) {
+                context.go('/login');
+              }
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Logout'),

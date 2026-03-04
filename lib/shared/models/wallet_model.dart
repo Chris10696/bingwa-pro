@@ -19,6 +19,8 @@ enum WalletTransactionType {
   bonus,
   @JsonValue('TRANSFER')
   transfer,
+  @JsonValue('WITHDRAWAL')
+  withdrawal,
 }
 
 // Wallet Transaction Status
@@ -56,6 +58,8 @@ abstract class WalletTransaction with _$WalletTransaction {
     String? initiatedBy, // AGENT, ADMIN, SYSTEM
     String? approvedBy,
     DateTime? approvedAt,
+    String? recipientAgentId, // For transfers
+    String? recipientPhone, // For withdrawals
     Map<String, dynamic>? metadata,
   }) = _WalletTransaction;
 
@@ -99,6 +103,42 @@ abstract class TokenPurchaseRequest with _$TokenPurchaseRequest {
 
   factory TokenPurchaseRequest.fromJson(Map<String, dynamic> json) =>
       _$TokenPurchaseRequestFromJson(json);
+}
+
+// Transfer Request
+@freezed
+abstract class TransferRequest with _$TransferRequest {
+  const factory TransferRequest({
+    required String fromAgentId,
+    required String toAgentId,
+    required double amount,
+    required String description,
+    required String deviceId,
+    String? reference,
+  }) = _TransferRequest;
+
+  factory TransferRequest.fromJson(Map<String, dynamic> json) =>
+      _$TransferRequestFromJson(json);
+}
+
+// Withdrawal Request
+@freezed
+abstract class WithdrawalRequest with _$WithdrawalRequest {
+  const factory WithdrawalRequest({
+    required String agentId,
+    required double amount,
+    required String phoneNumber,
+    required String paymentMethod, // MPESA_TILL, MPESA_PAYBILL
+    required String deviceId,
+    String? tillNumber,
+    String? paybillNumber,
+    String? accountNumber,
+    String? description,
+    String? reference,
+  }) = _WithdrawalRequest;
+
+  factory WithdrawalRequest.fromJson(Map<String, dynamic> json) =>
+      _$WithdrawalRequestFromJson(json);
 }
 
 // M-Pesa Payment Request

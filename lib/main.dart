@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:go_router/go_router.dart'; // Add this import
 import 'app_router.dart';
 import 'core/utils/session_manager.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'core/security/secure_storage_manager.dart';
+
+// Global navigator key for navigation without BuildContext
+// Note: This is used by the auth interceptor but not directly by MaterialApp.router
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   // Load environment variables
@@ -55,6 +58,8 @@ class _BingwaProAppState extends ConsumerState<BingwaProApp> {
     return MaterialApp.router(
       title: 'Bingwa Pro',
       debugShowCheckedModeBanner: false,
+      // navigatorKey is not a parameter on MaterialApp.router
+      // The router handles navigation internally
       theme: ThemeData(
         primarySwatch: Colors.green,
         primaryColor: const Color(0xFF00C853),

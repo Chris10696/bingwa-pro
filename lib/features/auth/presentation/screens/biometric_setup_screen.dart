@@ -256,7 +256,7 @@ class _BiometricSetupScreenState extends ConsumerState<BiometricSetupScreen> {
     }
     
     if (state.setupComplete) {
-      return _buildSuccessScreen(context);
+      return _buildSuccessScreen();
     }
     
     return Scaffold(
@@ -431,7 +431,8 @@ class _BiometricSetupScreenState extends ConsumerState<BiometricSetupScreen> {
               width: 150,
               height: 150,
               decoration: BoxDecoration(
-                color: const Color(0xFF00C853).withOpacity(0.1),
+                // FIXED: Replaced withOpacity with withValues
+                color: const Color(0xFF00C853).withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: state.selectedBiometric != null
@@ -616,7 +617,7 @@ class _BiometricSetupScreenState extends ConsumerState<BiometricSetupScreen> {
     );
   }
   
-  Widget _buildSuccessScreen(BuildContext context) {
+  Widget _buildSuccessScreen() {
     return Scaffold(
       body: SafeArea(
         child: Padding(
@@ -629,7 +630,8 @@ class _BiometricSetupScreenState extends ConsumerState<BiometricSetupScreen> {
                 width: 120,
                 height: 120,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF00C853).withOpacity(0.1),
+                  // FIXED: Replaced withOpacity with withValues
+                  color: const Color(0xFF00C853).withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -730,7 +732,7 @@ class _BiometricSetupScreenState extends ConsumerState<BiometricSetupScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Biometric Not Available'),
         content: const Text(
           'Your device does not support biometric authentication. '
@@ -739,8 +741,8 @@ class _BiometricSetupScreenState extends ConsumerState<BiometricSetupScreen> {
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.pop(context);
-              context.go('/dashboard');
+              Navigator.pop(dialogContext);
+              if (mounted) context.go('/dashboard');
             },
             child: const Text('CONTINUE'),
           ),
@@ -750,12 +752,16 @@ class _BiometricSetupScreenState extends ConsumerState<BiometricSetupScreen> {
   }
   
   Future<void> _testBiometricLogin() async {
-    final state = ref.read(biometricSetupNotifierProvider);
     final notifier = ref.read(biometricSetupNotifierProvider.notifier);
     
     await notifier.authenticate();
     
-    if (state.errorMessage == null && state.setupComplete) {
+    // FIXED: Get updated state after authentication
+    final updatedState = ref.read(biometricSetupNotifierProvider);
+    
+    if (!mounted) return;
+    
+    if (updatedState.errorMessage == null && updatedState.setupComplete) {
       // Show success
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

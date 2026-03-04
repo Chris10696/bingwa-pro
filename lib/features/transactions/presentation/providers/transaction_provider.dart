@@ -1,6 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:bingwa_pro/shared/models/transaction_model.dart';
 import 'package:bingwa_pro/shared/repositories/transaction_repository.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../core/security/device_fingerprint.dart';
 
 class TransactionState {
   final List<Transaction> transactions;
@@ -9,6 +12,9 @@ class TransactionState {
   final String? error;
   final int page;
   final bool hasMore;
+  final bool isRetrying;
+  final String? retryError;
+  final String? retrySuccessMessage;
 
   TransactionState({
     this.transactions = const [],
@@ -17,6 +23,9 @@ class TransactionState {
     this.error,
     this.page = 1,
     this.hasMore = true,
+    this.isRetrying = false,
+    this.retryError,
+    this.retrySuccessMessage,
   });
 
   TransactionState copyWith({
@@ -26,24 +35,33 @@ class TransactionState {
     String? error,
     int? page,
     bool? hasMore,
+    bool? isRetrying,
+    String? retryError,
+    String? retrySuccessMessage,
   }) {
     return TransactionState(
       transactions: transactions ?? this.transactions,
       isLoading: isLoading ?? this.isLoading,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
-      error: error,
+      error: error ?? this.error,
       page: page ?? this.page,
       hasMore: hasMore ?? this.hasMore,
+      isRetrying: isRetrying ?? this.isRetrying,
+      retryError: retryError ?? this.retryError,
+      retrySuccessMessage: retrySuccessMessage ?? this.retrySuccessMessage,
     );
   }
 }
 
 class TransactionNotifier extends StateNotifier<TransactionState> {
   final TransactionRepository _repository;
+  final Ref _ref;
+  final DeviceInfoPlugin _deviceInfo = DeviceInfoPlugin();
+  
   String _currentFilter = 'all';
   String _currentPeriod = 'today';
 
-  TransactionNotifier(this._repository) : super(TransactionState());
+  TransactionNotifier(this._repository, this._ref) : super(TransactionState());
 
   Future<void> loadTransactions() async {
     try {
@@ -124,13 +142,97 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
     await loadTransactions();
   }
 
-  Future<void> retryTransaction(String transactionId) async {
+  // Helper method to get device ID
+  Future<String> _getDeviceId() async {
     try {
-      // TODO: Implement retry logic using _repository.retryTransaction()
-      // You'll need to create a RetryRequest object
+      // First try to get from DeviceFingerprint
+      final deviceId = await DeviceFingerprint.generateDeviceId();
+      if (deviceId.isNotEmpty) {
+        return deviceId;
+      }
+      
+      // Fallback to device info
+      final androidInfo = await _deviceInfo.androidInfo;
+      return androidInfo.id;
     } catch (e) {
-      rethrow;
+      // Last resort fallback
+      return 'unknown_device_${DateTime.now().millisecondsSinceEpoch}';
     }
+  }
+
+  // FIXED: Implement retry logic (Line 129)
+  Future<TransactionResponse?> retryTransaction(String transactionId) async {
+    state = state.copyWith(isRetrying: true, retryError: null, retrySuccessMessage: null);
+
+    try {
+      // Get agent ID from auth state
+      final authState = _ref.read(authNotifierProvider);
+      final agentId = authState.agent?.id ?? '';
+      
+      if (agentId.isEmpty) {
+        throw Exception('Agent ID not found. Please login again.');
+      }
+
+      // Get device ID
+      final deviceId = await _getDeviceId();
+
+      // Create retry request
+      final request = RetryRequest(
+        transactionId: transactionId,
+        agentId: agentId,
+        deviceId: deviceId,
+        newUssdCode: null, // Use original USSD code
+        overrideParams: null,
+      );
+
+      // Execute retry
+      final response = await _repository.retryTransaction(request);
+
+      // Update the transaction in the list
+      final updatedTransactions = state.transactions.map((t) {
+        if (t.id == transactionId) {
+          return Transaction(
+            id: response.transactionId,
+            type: t.type,
+            amount: response.amount,
+            recipientPhone: t.recipientPhone,
+            status: response.status,
+            createdAt: t.createdAt,
+            updatedAt: DateTime.now(),
+            referenceId: response.reference,
+            description: t.description,
+            commission: response.commission,
+            agentId: t.agentId,
+            productName: t.productName,
+            bundleSize: t.bundleSize,
+            balanceAfter: response.balanceAfter,
+          );
+        }
+        return t;
+      }).toList();
+
+      state = state.copyWith(
+        transactions: updatedTransactions,
+        isRetrying: false,
+        retrySuccessMessage: 'Transaction retried successfully',
+      );
+
+      return response;
+    } catch (e) {
+      state = state.copyWith(
+        isRetrying: false,
+        retryError: 'Retry failed: ${e.toString()}',
+      );
+      return null;
+    }
+  }
+
+  // Clear retry messages
+  void clearRetryMessages() {
+    state = state.copyWith(
+      retryError: null,
+      retrySuccessMessage: null,
+    );
   }
 
   // Helper method to create TransactionFilter from filter string and period
@@ -187,9 +289,18 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
       endDate: endDate,
     );
   }
+
+  // Get transaction by ID
+  Transaction? getTransactionById(String id) {
+    try {
+      return state.transactions.firstWhere((t) => t.id == id);
+    } catch (e) {
+      return null;
+    }
+  }
 }
 
 final transactionProvider = StateNotifierProvider<TransactionNotifier, TransactionState>((ref) {
   final repository = ref.read(transactionRepositoryProvider);
-  return TransactionNotifier(repository);
+  return TransactionNotifier(repository, ref);
 });

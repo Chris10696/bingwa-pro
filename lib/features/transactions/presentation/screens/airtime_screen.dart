@@ -118,7 +118,7 @@ class _AirtimeScreenState extends ConsumerState<AirtimeScreen> {
                       ? null
                       : () {
                           if (_formKey.currentState?.validate() == true) {
-                            _confirmTransaction(context, state, notifier);
+                            _confirmTransaction(state, notifier);
                           }
                         },
                   style: ElevatedButton.styleFrom(
@@ -287,10 +287,11 @@ class _AirtimeScreenState extends ConsumerState<AirtimeScreen> {
     );
   }
 
-  void _confirmTransaction(BuildContext context, TransactionExecutionState state, TransactionExecutionNotifier notifier) {
-    showDialog(
+  Future<void> _confirmTransaction(TransactionExecutionState state, TransactionExecutionNotifier notifier) async {
+    // Show confirmation dialog and wait for result
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Confirm Transaction'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -309,18 +310,11 @@ class _AirtimeScreenState extends ConsumerState<AirtimeScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await notifier.executeTransaction();
-
-              if (mounted && state.showConfirmation && state.lastResponse != null) {
-                _showTransactionResult(context, state.lastResponse!);
-              }
-            },
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF00C853),
             ),
@@ -329,15 +323,25 @@ class _AirtimeScreenState extends ConsumerState<AirtimeScreen> {
         ],
       ),
     );
+
+    if (confirmed != true || !mounted) return;
+
+    // Execute transaction
+    await notifier.executeTransaction();
+
+    // Show result
+    if (mounted && state.showConfirmation && state.lastResponse != null) {
+      _showTransactionResult(state.lastResponse!);
+    }
   }
 
-  void _showTransactionResult(BuildContext context, TransactionResponse response) {
+  void _showTransactionResult(TransactionResponse response) {
     final isSuccess = response.status == TransactionStatus.success;
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Icon(
           isSuccess ? Icons.check_circle : Icons.error,
           size: 60,
@@ -373,9 +377,9 @@ class _AirtimeScreenState extends ConsumerState<AirtimeScreen> {
           Center(
             child: ElevatedButton(
               onPressed: () {
-                Navigator.pop(context);
+                Navigator.pop(dialogContext);
                 ref.read(transactionExecutionProvider.notifier).clearConfirmation();
-                if (isSuccess) {
+                if (isSuccess && mounted) {
                   context.pop();
                 }
               },

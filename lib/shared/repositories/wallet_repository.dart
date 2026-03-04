@@ -125,6 +125,86 @@ class WalletRepository {
     }
   }
   
+  // Transfer tokens to another agent
+  Future<WalletTransaction> transferTokens(TransferRequest request) async {
+    try {
+      AppLogger.logNetworkRequest(
+        method: 'POST',
+        url: '/wallet/transfer',
+        data: request.toJson(),
+      );
+      
+      final response = await _dio.post(
+        '/wallet/transfer',
+        data: request.toJson(),
+      );
+      
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: '/wallet/transfer',
+        data: response.data,
+      );
+      
+      final transaction = WalletTransaction.fromJson(response.data);
+      
+      AppLogger.logTransaction(
+        type: 'Transfer',
+        phone: 'To: ${request.toAgentId}',
+        amount: request.amount,
+        status: transaction.status.name,
+        reference: transaction.reference,
+      );
+      
+      return transaction;
+    } on DioException catch (e) {
+      AppLogger.e('Transfer failed:', e);
+      rethrow;
+    } catch (e) {
+      AppLogger.e('Transfer error:', e);
+      rethrow;
+    }
+  }
+  
+  // Withdraw tokens to M-Pesa
+  Future<WalletTransaction> withdrawTokens(WithdrawalRequest request) async {
+    try {
+      AppLogger.logNetworkRequest(
+        method: 'POST',
+        url: '/wallet/withdraw',
+        data: request.toJson(),
+      );
+      
+      final response = await _dio.post(
+        '/wallet/withdraw',
+        data: request.toJson(),
+      );
+      
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: '/wallet/withdraw',
+        data: response.data,
+      );
+      
+      final transaction = WalletTransaction.fromJson(response.data);
+      
+      AppLogger.logTransaction(
+        type: 'Withdrawal',
+        phone: request.phoneNumber,
+        amount: request.amount,
+        status: transaction.status.name,
+        reference: transaction.reference,
+      );
+      
+      return transaction;
+    } on DioException catch (e) {
+      AppLogger.e('Withdrawal failed:', e);
+      rethrow;
+    } catch (e) {
+      AppLogger.e('Withdrawal error:', e);
+      rethrow;
+    }
+  }
+  
   // Initiate M-Pesa Payment
   Future<Map<String, dynamic>> initiateMpesaPayment(MpesaPaymentRequest request) async {
     try {

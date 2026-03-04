@@ -107,7 +107,8 @@ class _HelpScreenState extends ConsumerState<HelpScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          ..._faqs.map((faq) => _buildFaqItem(faq)).toList(),
+          // FIXED: Removed unnecessary .toList() in spread
+          ..._faqs.map((faq) => _buildFaqItem(faq)),
           const SizedBox(height: 24),
 
           // Quick Links
@@ -132,6 +133,7 @@ class _HelpScreenState extends ConsumerState<HelpScreen> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
                     // TODO: Show user guide
+                    _showComingSoonSnackBar();
                   },
                 ),
                 const Divider(height: 1),
@@ -141,6 +143,7 @@ class _HelpScreenState extends ConsumerState<HelpScreen> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
                     // TODO: Show terms
+                    _showComingSoonSnackBar();
                   },
                 ),
                 const Divider(height: 1),
@@ -150,6 +153,7 @@ class _HelpScreenState extends ConsumerState<HelpScreen> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
                     // TODO: Show privacy policy
+                    _showComingSoonSnackBar();
                   },
                 ),
               ],
@@ -212,14 +216,25 @@ class _HelpScreenState extends ConsumerState<HelpScreen> {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri);
       } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not launch $url')),
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
     }
+  }
+
+  void _showComingSoonSnackBar() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('This feature is coming soon!'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 }

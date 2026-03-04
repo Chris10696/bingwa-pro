@@ -23,6 +23,15 @@ import 'package:bingwa_pro/features/customers/presentation/screens/customers_scr
 import 'package:bingwa_pro/features/reports/presentation/screens/reports_screen.dart';
 import 'package:bingwa_pro/features/help/presentation/screens/help_screen.dart';
 
+// ========== NEW FEATURE SCREEN IMPORTS ==========
+import 'package:bingwa_pro/features/quick_dial/presentation/screens/quick_dial_screen.dart';
+import 'package:bingwa_pro/features/auto_renewals/presentation/screens/auto_renewals_screen.dart';
+import 'package:bingwa_pro/features/sitelink/presentation/screens/sitelink_screen.dart';
+import 'package:bingwa_pro/features/auto_reply/presentation/screens/auto_reply_screen.dart';
+
+// ========== CUSTOMER DETAIL SCREEN IMPORT ==========
+import 'package:bingwa_pro/features/customers/presentation/screens/customer_detail_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -52,6 +61,15 @@ class AppRoutes {
   static const String customers = '/customers';
   static const String reports = '/reports';
   static const String help = '/help';
+  
+  // ========== CUSTOMER DETAIL ROUTE ==========
+  static const String customerDetail = '/customers/:id';
+  
+  // ========== NEW FEATURE ROUTES ==========
+  static const String quickDial = '/quick-dial';
+  static const String autoRenewals = '/auto-renewals';
+  static const String siteLink = '/sitelink';
+  static const String autoReply = '/auto-reply';
   
   // Root paths
   static const String root = '/';
@@ -325,7 +343,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       
-      // ========== NEW FEATURE ROUTES ==========
+      // ========== NEW FEATURE ROUTES (PREVIOUSLY ADDED) ==========
       GoRoute(
         path: AppRoutes.offers,
         name: 'offers',
@@ -352,6 +370,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       
+      // ========== CUSTOMER DETAIL ROUTE ==========
+      GoRoute(
+        path: AppRoutes.customerDetail,
+        name: 'customerDetail',
+        pageBuilder: (context, state) {
+          final customerId = state.pathParameters['id'] ?? '';
+          return CustomTransitionPage<void>(
+            key: state.pageKey,
+            child: CustomerDetailScreen(customerId: customerId),
+            transitionsBuilder: AppTransitions.slideTransition,
+            transitionDuration: const Duration(milliseconds: 350),
+          );
+        },
+      ),
+      
       GoRoute(
         path: AppRoutes.reports,
         name: 'reports',
@@ -372,6 +405,59 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return CustomTransitionPage<void>(
             key: state.pageKey,
             child: const HelpScreen(),
+            transitionsBuilder: AppTransitions.slideTransition,
+            transitionDuration: const Duration(milliseconds: 350),
+          );
+        },
+      ),
+      
+      // ========== NEW FEATURE ROUTES ==========
+      GoRoute(
+        path: AppRoutes.quickDial,
+        name: 'quickDial',
+        pageBuilder: (context, state) {
+          return CustomTransitionPage<void>(
+            key: state.pageKey,
+            child: const QuickDialScreen(),
+            transitionsBuilder: AppTransitions.slideTransition,
+            transitionDuration: const Duration(milliseconds: 350),
+          );
+        },
+      ),
+      
+      GoRoute(
+        path: AppRoutes.autoRenewals,
+        name: 'autoRenewals',
+        pageBuilder: (context, state) {
+          return CustomTransitionPage<void>(
+            key: state.pageKey,
+            child: const AutoRenewalsScreen(),
+            transitionsBuilder: AppTransitions.slideTransition,
+            transitionDuration: const Duration(milliseconds: 350),
+          );
+        },
+      ),
+      
+      GoRoute(
+        path: AppRoutes.siteLink,
+        name: 'siteLink',
+        pageBuilder: (context, state) {
+          return CustomTransitionPage<void>(
+            key: state.pageKey,
+            child: const SiteLinkScreen(),
+            transitionsBuilder: AppTransitions.slideTransition,
+            transitionDuration: const Duration(milliseconds: 350),
+          );
+        },
+      ),
+      
+      GoRoute(
+        path: AppRoutes.autoReply,
+        name: 'autoReply',
+        pageBuilder: (context, state) {
+          return CustomTransitionPage<void>(
+            key: state.pageKey,
+            child: const AutoReplyScreen(),
             transitionsBuilder: AppTransitions.slideTransition,
             transitionDuration: const Duration(milliseconds: 350),
           );
@@ -482,8 +568,15 @@ extension GoRouterExtension on BuildContext {
   // ========== NEW NAVIGATION METHODS ==========
   void goToOffers() => go(AppRoutes.offers);
   void goToCustomers() => go(AppRoutes.customers);
+  void goToCustomerDetails(String customerId) => go('/customers/$customerId');
   void goToReports() => go(AppRoutes.reports);
   void goToHelp() => go(AppRoutes.help);
+  
+  // ========== NEW FEATURE NAVIGATION METHODS ==========
+  void goToQuickDial() => go(AppRoutes.quickDial);
+  void goToAutoRenewals() => go(AppRoutes.autoRenewals);
+  void goToSiteLink() => go(AppRoutes.siteLink);
+  void goToAutoReply() => go(AppRoutes.autoReply);
   
   // Replace navigation (no back button)
   void replaceWithDashboard() => go(AppRoutes.dashboard);

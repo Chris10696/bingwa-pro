@@ -95,7 +95,7 @@ class _SMSScreenState extends ConsumerState<SMSScreen> {
                       ? null
                       : () {
                           if (_formKey.currentState?.validate() == true) {
-                            _confirmTransaction(context, state, notifier);
+                            _confirmTransaction(state, notifier);
                           }
                         },
                   style: ElevatedButton.styleFrom(
@@ -105,7 +105,14 @@ class _SMSScreenState extends ConsumerState<SMSScreen> {
                     ),
                   ),
                   child: state.isSubmitting
-                      ? const ButtonLoadingIndicator()
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
                       : const Text(
                           'PROCEED TO TRANSACTION',
                           style: TextStyle(
@@ -162,7 +169,7 @@ class _SMSScreenState extends ConsumerState<SMSScreen> {
 
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
-          color: isSelected ? const Color(0xFF00C853).withAlpha(25) : null,
+          color: isSelected ? const Color(0xFF00C853).withValues(alpha: 0.1) : null,
           child: ListTile(
             leading: Container(
               width: 40,
@@ -213,34 +220,31 @@ class _SMSScreenState extends ConsumerState<SMSScreen> {
     IconData icon;
     String status;
 
-    switch (health.status) {
-      case UssdStatus.green:
-        color = Colors.green;
-        icon = Icons.check_circle;
-        status = 'System Normal';
-        break;
-      case UssdStatus.yellow:
-        color = Colors.orange;
-        icon = Icons.warning;
-        status = 'Degraded Performance';
-        break;
-      case UssdStatus.red:
-        color = Colors.red;
-        icon = Icons.error;
-        status = 'System Issues';
-        break;
-      default:
-        color = Colors.grey;
-        icon = Icons.help;
-        status = 'Unknown';
+    // FIXED: Using if-else instead of switch with enum to avoid unreachable default
+    if (health.status == UssdStatus.green) {
+      color = Colors.green;
+      icon = Icons.check_circle;
+      status = 'System Normal';
+    } else if (health.status == UssdStatus.yellow) {
+      color = Colors.orange;
+      icon = Icons.warning;
+      status = 'Degraded Performance';
+    } else if (health.status == UssdStatus.red) {
+      color = Colors.red;
+      icon = Icons.error;
+      status = 'System Issues';
+    } else {
+      color = Colors.grey;
+      icon = Icons.help;
+      status = 'Unknown';
     }
 
     return Container(
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
-        color: color.withAlpha(25),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withAlpha(75)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -273,10 +277,11 @@ class _SMSScreenState extends ConsumerState<SMSScreen> {
     );
   }
 
-  void _confirmTransaction(BuildContext context, TransactionExecutionState state, TransactionExecutionNotifier notifier) {
-    showDialog(
+  Future<void> _confirmTransaction(TransactionExecutionState state, TransactionExecutionNotifier notifier) async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Confirm Transaction'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -296,18 +301,11 @@ class _SMSScreenState extends ConsumerState<SMSScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await notifier.executeTransaction();
-
-              if (mounted && state.showConfirmation && state.lastResponse != null) {
-                _showTransactionResult(context, state.lastResponse!);
-              }
-            },
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF00C853),
             ),
@@ -316,15 +314,25 @@ class _SMSScreenState extends ConsumerState<SMSScreen> {
         ],
       ),
     );
+
+    if (confirmed != true || !mounted) return;
+
+    // Execute transaction
+    await notifier.executeTransaction();
+
+    // Show result
+    if (mounted && state.showConfirmation && state.lastResponse != null) {
+      _showTransactionResult(state.lastResponse!);
+    }
   }
 
-  void _showTransactionResult(BuildContext context, TransactionResponse response) {
+  void _showTransactionResult(TransactionResponse response) {
     final isSuccess = response.status == TransactionStatus.success;
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Icon(
           isSuccess ? Icons.check_circle : Icons.error,
           size: 60,
@@ -360,9 +368,9 @@ class _SMSScreenState extends ConsumerState<SMSScreen> {
           Center(
             child: ElevatedButton(
               onPressed: () {
-                Navigator.pop(context);
+                Navigator.pop(dialogContext);
                 ref.read(transactionExecutionProvider.notifier).clearConfirmation();
-                if (isSuccess) {
+                if (isSuccess && mounted) {
                   context.pop();
                 }
               },

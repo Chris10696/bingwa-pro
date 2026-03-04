@@ -188,7 +188,7 @@ class TransactionRepository {
     }
   }
   
-  // Retry Transaction
+  // Retry Transaction - FIXED: Implements retry logic
   Future<TransactionResponse> retryTransaction(RetryRequest request) async {
     try {
       final url = ApiConstants.retryTransaction.replaceFirst('{id}', request.transactionId);
@@ -215,7 +215,7 @@ class TransactionRepository {
       AppLogger.logTransaction(
         type: 'Retry',
         phone: 'N/A',
-        amount: 0,
+        amount: transactionResponse.amount,
         status: transactionResponse.status.name,
         reference: transactionResponse.reference,
       );

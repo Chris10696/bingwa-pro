@@ -145,6 +145,15 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
     final methods = state.paymentMethods ?? [];
     final selectedMethod = state.selectedPaymentMethod;
 
+    if (methods.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Text('No payment methods available'),
+        ),
+      );
+    }
+
     return Column(
       children: methods.map((method) {
         return Card(
@@ -161,13 +170,26 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
     );
   }
 
-  void _proceedToPayment(WalletState state, WalletNotifier notifier) {
+  Future<void> _proceedToPayment(WalletState state, WalletNotifier notifier) async {
     final amount = double.tryParse(_amountController.text) ?? 0.0;
     final method = state.selectedPaymentMethod;
 
-    showDialog(
+    // Validate method is selected
+    if (method.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a payment method'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Show confirmation dialog and wait for result
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Confirm Payment'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -184,22 +206,11 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await notifier.purchaseTokens(
-                amount: amount,
-                paymentMethod: method,
-              );
-
-              // Check if there's a pending transaction
-              if (mounted && state.pendingTransaction != null) {
-                _showPaymentInstructions(context, state);
-              }
-            },
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF00C853),
             ),
@@ -208,6 +219,23 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
         ],
       ),
     );
+
+    if (confirmed != true || !mounted) return;
+
+    // Execute purchase
+    await notifier.purchaseTokens(
+      amount: amount,
+      paymentMethod: method,
+    );
+
+    // Check result
+    if (!mounted) return;
+    
+    // Refresh state to get updated pendingTransaction
+    final updatedState = ref.read(walletNotifierProvider);
+    if (updatedState.pendingTransaction != null) {
+      _showPaymentInstructions(updatedState);
+    }
   }
 
   String _getMethodDisplayName(String type) {
@@ -223,7 +251,7 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
     }
   }
 
-  void _showPaymentInstructions(BuildContext context, WalletState state) {
+  void _showPaymentInstructions(WalletState state) {
     final transaction = state.pendingTransaction;
     final method = state.selectedPaymentMethod;
 
@@ -232,8 +260,8 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
     switch (method) {
       case 'MPESA_TILL':
         instructions = '1. Go to M-Pesa on your phone\n'
-            '2. Select "Pay Bill"\n'
-            '3. Enter Business No: 123456\n'
+            '2. Select "Lipa Na M-Pesa"\n'
+            '3. Enter Till Number: 123456\n'
             '4. Enter Account No: ${transaction?.reference}\n'
             '5. Enter Amount: ${_amountController.text}\n'
             '6. Enter your M-Pesa PIN\n'
@@ -261,7 +289,7 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Payment Instructions'),
         content: SingleChildScrollView(
           child: Column(
@@ -284,12 +312,12 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               if (transaction != null) {
                 _confirmPayment(transaction.id);
               }
@@ -308,7 +336,9 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
     final notifier = ref.read(walletNotifierProvider.notifier);
     await notifier.confirmPayment(transactionId);
 
-    // Check if payment was successful
+    if (!mounted) return;
+
+    // Get updated state
     final state = ref.read(walletNotifierProvider);
     final transaction = state.transactions?.firstWhere(
       (t) => t.id == transactionId,
@@ -329,7 +359,7 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
   void _showTransactionNotFoundDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Icon(
           Icons.warning,
           size: 60,
@@ -355,8 +385,8 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
         actions: [
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context);
-              context.pop();
+              Navigator.pop(dialogContext);
+              if (mounted) context.pop();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF00C853),
@@ -372,7 +402,7 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Icon(
           Icons.check_circle,
           size: 60,
@@ -399,13 +429,16 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
           Center(
             child: ElevatedButton(
               onPressed: () {
-                Navigator.pop(context);
-                context.pop();
+                Navigator.pop(dialogContext);
+                if (mounted) {
+                  context.pop(); // Close top-up screen
+                  context.push('/wallet'); // Go to wallet
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF00C853),
               ),
-              child: const Text('Back to Wallet'),
+              child: const Text('View Wallet'),
             ),
           ),
         ],
@@ -416,7 +449,7 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
   void _showFailureDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Icon(
           Icons.error,
           size: 60,
@@ -441,13 +474,13 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Try Again'),
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context);
-              context.pop();
+              Navigator.pop(dialogContext);
+              if (mounted) context.pop();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF00C853),
@@ -479,60 +512,76 @@ class _PaymentMethodRadio extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      child: Row(
-        children: [
-          Radio<String>(
-            value: method.type,
-            groupValue: isSelected ? method.type : null,
-            onChanged: (value) {
-              if (value != null) {
-                onSelected(value);
-              }
-            },
-            activeColor: const Color(0xFF00C853),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: const Color(0xFF00C853).withOpacity(0.1),
-              shape: BoxShape.circle,
+    return InkWell(
+      onTap: () {
+        onSelected(method.type);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: isSelected 
+              ? const Color(0xFF00C853).withValues(alpha: 0.05)
+              : null,
+        ),
+        child: Row(
+          children: [
+            // Radio button
+            Radio<String>(
+              value: method.type,
+              groupValue: isSelected ? method.type : null,
+              onChanged: (value) {
+                if (value != null) {
+                  onSelected(value);
+                }
+              },
+              activeColor: const Color(0xFF00C853),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: Icon(
-              _getPaymentMethodIcon(method.type),
-              color: const Color(0xFF00C853),
+            const SizedBox(width: 12),
+            // Icon
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: const Color(0xFF00C853).withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _getPaymentMethodIcon(method.type),
+                color: const Color(0xFF00C853),
+                size: 20,
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  method.displayName,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w500,
-                    fontSize: 16,
-                  ),
-                ),
-                if (method.description != null && method.description!.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      method.description!,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[600],
-                      ),
+            const SizedBox(width: 12),
+            // Text content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    method.displayName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 16,
                     ),
                   ),
-              ],
+                  if (method.description.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        method.description,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

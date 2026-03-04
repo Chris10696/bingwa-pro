@@ -1,3 +1,4 @@
+import 'package:bingwa_pro/core/utils/logger.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:formz/formz.dart' show FormzInput, FormzSubmissionStatus, FormzSubmissionStatusX;
 import '/../../shared/models/auth_model.dart';
@@ -421,18 +422,29 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
   
   // Session Management
-  Future<void> logout() async {
-    state = state.copyWith(isLoading: true);
+ Future<void> logout() async {
+  state = state.copyWith(isLoading: true);
+  
+  try {
+    // Call API logout endpoint
+    await _authRepository.logout();
     
-    try {
-      await _authRepository.logout();
-      
-      state = AuthState();
-    } catch (e) {
-      // Even if API call fails, reset local state
-      state = AuthState();
-    }
+    // Clear all local storage
+    await SecureStorageManager.clearAll();
+    
+    // Reset state
+    state = AuthState();
+    
+    AppLogger.logSessionEvent(event: 'Logout successful');
+  } catch (e) {
+    AppLogger.e('Logout error:', e);
+    // Even if API fails, clear local state
+    await SecureStorageManager.clearAll();
+    state = AuthState();
+  } finally {
+    state = state.copyWith(isLoading: false);
   }
+}
   
   Future<void> checkAuthentication() async {
     state = state.copyWith(isLoading: true);

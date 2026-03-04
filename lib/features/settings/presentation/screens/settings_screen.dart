@@ -30,10 +30,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    // Load settings from secure storage or backend
-    final biometricKey = await SecureStorageManager.getBiometricKey();
+    // Load biometric setting from secure storage
+    final biometricEnabled = await SecureStorageManager.getBiometricEnabled(false);
+    
     setState(() {
-      _biometricEnabled = biometricKey != null;
+      _biometricEnabled = biometricEnabled;
     });
   }
 
@@ -84,16 +85,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           // App Preferences
           _buildSectionHeader('App Preferences'),
           _buildSettingsCard([
+            // FIXED: Biometric switch with proper saving
             _buildSwitchItem(
               icon: LineIcons.fingerprint,
               title: 'Biometric Login',
               subtitle: 'Use fingerprint or face ID',
               value: _biometricEnabled,
-              onChanged: (value) {
+              onChanged: (value) async {
                 setState(() {
                   _biometricEnabled = value;
                 });
-                // TODO: Save biometric setting
+                
+                // Save biometric setting to secure storage
+                await SecureStorageManager.setBiometricEnabled(value);
+                
+                // Show feedback
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(value 
+                        ? 'Biometric login enabled' 
+                        : 'Biometric login disabled'),
+                    backgroundColor: value ? Colors.green : Colors.orange,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
               },
             ),
             _buildSwitchItem(
@@ -179,8 +195,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _buildSectionHeader('Support'),
           _buildSettingsCard([
             _buildSettingsItem(
-              // Using Material Icons as reliable fallback
-              icon: Icons.help_outline, // Material icon instead of LineIcons
+              icon: Icons.help_outline,
               title: 'Help & Support',
               subtitle: 'FAQs, contact support',
               onTap: () {
@@ -196,8 +211,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               },
             ),
             _buildSettingsItem(
-              // Using Material Icons as reliable fallback
-              icon: Icons.security, // Material icon instead of LineIcons
+              icon: Icons.security,
               title: 'Privacy Policy',
               subtitle: 'How we handle your data',
               onTap: () {
@@ -252,7 +266,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
-            // Using withAlpha for better precision
             color: Colors.grey.withAlpha(25),
             blurRadius: 10,
             spreadRadius: 2,
@@ -263,10 +276,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         children: [
           CircleAvatar(
             radius: 40,
-            // Fixed: Using Color.fromARGB directly
             backgroundColor: const Color.fromARGB(25, 0, 200, 83),
             child: Text(
-              // FIXED: Simplified null handling
               _getInitials(agent?.fullName),
               style: const TextStyle(
                 fontSize: 32,
@@ -325,7 +336,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  // Helper method to get initials
   String _getInitials(String? name) {
     if (name == null || name.isEmpty) return 'A';
     final parts = name.split(' ');
@@ -403,9 +413,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         value: value,
         onChanged: onChanged,
         activeTrackColor: const Color(0xFF00C853).withOpacity(0.5),
-        thumbColor: MaterialStateProperty.resolveWith<Color>(
-          (Set<MaterialState> states) {
-            if (states.contains(MaterialState.selected)) {
+        thumbColor: WidgetStateProperty.resolveWith<Color>(
+          (Set<WidgetState> states) {
+            if (states.contains(WidgetState.selected)) {
               return const Color(0xFF00C853);
             }
             return Colors.grey.shade400;
@@ -466,7 +476,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   max: max,
                   divisions: divisions,
                   label: 'KES ${value.toStringAsFixed(0)}',
-                  // FIXED: Correct parameter name is thumbColor, not activeThumbColor
                   thumbColor: const Color(0xFF00C853),
                   activeColor: const Color(0xFF00C853),
                   onChanged: onChanged,
@@ -484,30 +493,74 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  void _confirmLogout(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
+  // Replace the _confirmLogout method with this:
+
+void _confirmLogout(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Logout'),
+      content: const Text('Are you sure you want to logout?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () async {
+            Navigator.pop(dialogContext);
+            
+            // Show loading indicator
+            if (!mounted) return;
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (loadingContext) => const Center(
+                child: CircularProgressIndicator(),
+              ),
+            );
+            
+            try {
+              // Call logout API
+              final authNotifier = ref.read(authNotifierProvider.notifier);
+              await authNotifier.logout();
+              
+              // Clear local storage
+              await SecureStorageManager.clearAll();
+              
+              if (!mounted) return;
+              
+              // Close loading dialog
               Navigator.pop(context);
-              // TODO: Implement logout
+              
+              // Navigate to login
               context.go('/login');
-            },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Logout'),
-          ),
-        ],
-      ),
-    );
-  }
+            } catch (e) {
+              if (!mounted) return;
+              
+              // Close loading dialog
+              Navigator.pop(context);
+              
+              // Show error
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Logout failed: $e'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+              
+              // Still clear local storage and navigate
+              await SecureStorageManager.clearAll();
+              context.go('/login');
+            }
+          },
+          style: TextButton.styleFrom(foregroundColor: Colors.red),
+          child: const Text('Logout'),
+        ),
+      ],
+    ),
+  );
+}
 
   void _confirmDeleteAccount(BuildContext context) {
     showDialog(

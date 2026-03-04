@@ -1,6 +1,9 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../app_router.dart'; // Import for appRouterProvider
 import '../../security/secure_storage_manager.dart';
+import '../../utils/logger.dart';
+import '../../../features/auth/presentation/providers/auth_provider.dart';
 
 class AuthInterceptor extends Interceptor {
   final Ref ref;
@@ -12,6 +15,11 @@ class AuthInterceptor extends Interceptor {
     RequestOptions options,
     RequestInterceptorHandler handler,
   ) async {
+    // Skip auth for public endpoints
+    if (_isPublicEndpoint(options.path)) {
+      return handler.next(options);
+    }
+    
     // Get auth token from secure storage
     final token = await SecureStorageManager.getAuthToken();
     
@@ -39,13 +47,44 @@ class AuthInterceptor extends Interceptor {
   ) async {
     // Handle 401 Unauthorized errors
     if (err.response?.statusCode == 401) {
-      // Clear tokens and redirect to login
-      await SecureStorageManager.clearAll();
+      AppLogger.w('Received 401 error, logging out');
       
-      // TODO: Trigger logout flow via Riverpod
-      // ref.read(authNotifierProvider.notifier).logout();
+      try {
+        // Clear all tokens from secure storage
+        await SecureStorageManager.clearAll();
+        
+        // Trigger logout flow via Riverpod
+        try {
+          final authNotifier = ref.read(authNotifierProvider.notifier);
+          await authNotifier.logout();
+        } catch (riverpodError) {
+          AppLogger.e('Error during Riverpod logout', riverpodError);
+        }
+        
+        // Navigate to login screen using GoRouter
+        try {
+          final router = ref.read(appRouterProvider);
+          router.go('/login');
+        } catch (routerError) {
+          AppLogger.e('Error during navigation', routerError);
+        }
+      } catch (e) {
+        AppLogger.e('Error during 401 logout', e);
+      }
     }
     
     handler.next(err);
+  }
+  
+  bool _isPublicEndpoint(String path) {
+    final publicPaths = [
+      '/auth/login',
+      '/auth/register',
+      '/auth/refresh',
+      '/auth/verify-phone',
+      '/auth/reset-pin',
+    ];
+    
+    return publicPaths.any((publicPath) => path.contains(publicPath));
   }
 }

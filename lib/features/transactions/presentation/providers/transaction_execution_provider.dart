@@ -1,6 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:bingwa_pro/shared/models/transaction_model.dart';
 import 'package:bingwa_pro/shared/repositories/transaction_repository.dart';
+import 'package:bingwa_pro/features/auth/presentation/providers/auth_provider.dart';
+import 'package:bingwa_pro/core/security/device_fingerprint.dart';
 
 class TransactionExecutionState {
   final List<ProductBundle>? availableProducts;
@@ -14,6 +17,7 @@ class TransactionExecutionState {
   final String? errorMessage;
   final bool showConfirmation;
   final TransactionResponse? lastResponse;
+  final String transactionStatus; // New: track transaction status for state machine
 
   TransactionExecutionState({
     this.availableProducts,
@@ -27,6 +31,7 @@ class TransactionExecutionState {
     this.errorMessage,
     this.showConfirmation = false,
     this.lastResponse,
+    this.transactionStatus = 'idle',
   });
 
   TransactionExecutionState copyWith({
@@ -41,6 +46,7 @@ class TransactionExecutionState {
     String? errorMessage,
     bool? showConfirmation,
     TransactionResponse? lastResponse,
+    String? transactionStatus,
   }) {
     return TransactionExecutionState(
       availableProducts: availableProducts ?? this.availableProducts,
@@ -51,21 +57,24 @@ class TransactionExecutionState {
       ussdHealth: ussdHealth ?? this.ussdHealth,
       isLoading: isLoading ?? this.isLoading,
       isSubmitting: isSubmitting ?? this.isSubmitting,
-      errorMessage: errorMessage,
+      errorMessage: errorMessage ?? this.errorMessage,
       showConfirmation: showConfirmation ?? this.showConfirmation,
       lastResponse: lastResponse ?? this.lastResponse,
+      transactionStatus: transactionStatus ?? this.transactionStatus,
     );
   }
 }
 
 class TransactionExecutionNotifier extends StateNotifier<TransactionExecutionState> {
   final TransactionRepository _repository;
+  final Ref _ref;
+  final DeviceInfoPlugin _deviceInfo = DeviceInfoPlugin();
 
-  TransactionExecutionNotifier(this._repository) : super(TransactionExecutionState());
+  TransactionExecutionNotifier(this._repository, this._ref) : super(TransactionExecutionState());
 
   Future<void> loadInitialData() async {
     try {
-      state = state.copyWith(isLoading: true, errorMessage: null);
+      state = state.copyWith(isLoading: true, errorMessage: null, transactionStatus: 'loading');
       
       // Load available products and USSD health status in parallel
       final results = await Future.wait([
@@ -81,11 +90,13 @@ class TransactionExecutionNotifier extends StateNotifier<TransactionExecutionSta
         isLoading: false,
         availableProducts: products,
         ussdHealth: ussdHealth,
+        transactionStatus: 'ready',
       );
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
         errorMessage: 'Failed to load initial data: ${e.toString()}',
+        transactionStatus: 'error',
       );
     }
   }
@@ -109,6 +120,34 @@ class TransactionExecutionNotifier extends StateNotifier<TransactionExecutionSta
     );
   }
 
+  // FIXED: Get agent ID from auth state (Line 125)
+  Future<String> _getAgentId() async {
+    try {
+      final authState = _ref.read(authNotifierProvider);
+      return authState.agent?.id ?? '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // FIXED: Get device ID from device info (Line 133)
+  Future<String> _getDeviceId() async {
+    try {
+      // First try to get from DeviceFingerprint
+      final deviceId = await DeviceFingerprint.generateDeviceId();
+      if (deviceId.isNotEmpty) {
+        return deviceId;
+      }
+      
+      // Fallback to device info
+      final androidInfo = await _deviceInfo.androidInfo;
+      return androidInfo.id;
+    } catch (e) {
+      // Last resort fallback
+      return 'unknown_device_${DateTime.now().millisecondsSinceEpoch}';
+    }
+  }
+
   Future<void> executeTransaction() async {
     if (state.isSubmitting || 
         state.customerPhone.isEmpty || 
@@ -118,11 +157,23 @@ class TransactionExecutionNotifier extends StateNotifier<TransactionExecutionSta
     }
 
     try {
-      state = state.copyWith(isSubmitting: true, errorMessage: null);
+      state = state.copyWith(
+        isSubmitting: true, 
+        errorMessage: null, 
+        transactionStatus: 'initiated'
+      );
       
-      // Create transaction request
+      // Get agent ID and device ID
+      final agentId = await _getAgentId();
+      final deviceId = await _getDeviceId();
+      
+      if (agentId.isEmpty) {
+        throw Exception('Agent ID not found. Please login again.');
+      }
+      
+      // Create transaction request with real IDs
       final request = TransactionRequest(
-        agentId: 'current_agent', // TODO: Get from auth state
+        agentId: agentId,
         type: state.transactionType ?? TransactionType.airtime,
         customerPhone: state.customerPhone,
         amount: state.amount!,
@@ -130,8 +181,10 @@ class TransactionExecutionNotifier extends StateNotifier<TransactionExecutionSta
         productName: state.selectedProduct?.name ?? 'Airtime',
         bundleSize: state.selectedProduct?.value,
         ussdCode: state.selectedProduct?.ussdCode ?? '*144*1*1*1#',
-        deviceId: 'device_id', // TODO: Get from device info
+        deviceId: deviceId,
       );
+
+      state = state.copyWith(transactionStatus: 'executing');
 
       // Execute based on transaction type
       TransactionResponse response;
@@ -153,11 +206,13 @@ class TransactionExecutionNotifier extends StateNotifier<TransactionExecutionSta
         isSubmitting: false,
         showConfirmation: true,
         lastResponse: response,
+        transactionStatus: response.status == TransactionStatus.success ? 'success' : 'failed',
       );
     } catch (e) {
       state = state.copyWith(
         isSubmitting: false,
         errorMessage: 'Transaction failed: ${e.toString()}',
+        transactionStatus: 'error',
       );
     }
   }
@@ -175,9 +230,26 @@ class TransactionExecutionNotifier extends StateNotifier<TransactionExecutionSta
       ussdHealth: state.ussdHealth,
     );
   }
+
+  // New method to check USSD health before transaction
+  Future<bool> isUssdHealthy() async {
+    try {
+      if (state.ussdHealth == null) {
+        await loadInitialData();
+      }
+      return state.ussdHealth?.status == UssdStatus.green;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // New method to get transaction status
+  String getTransactionStatus() {
+    return state.transactionStatus;
+  }
 }
 
 final transactionExecutionProvider = StateNotifierProvider<TransactionExecutionNotifier, TransactionExecutionState>((ref) {
   final repository = ref.read(transactionRepositoryProvider);
-  return TransactionExecutionNotifier(repository);
+  return TransactionExecutionNotifier(repository, ref);
 });

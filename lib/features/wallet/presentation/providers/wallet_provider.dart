@@ -1,3 +1,4 @@
+import 'package:bingwa_pro/core/utils/formatters.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import '../../../../shared/models/wallet_model.dart';
@@ -18,9 +19,13 @@ abstract class WalletState with _$WalletState {
     String? errorMessage,
     @Default(false) bool isPurchasingTokens,
     @Default(false) bool isConfirmingPayment,
+    @Default(false) bool isTransferring,
+    @Default(false) bool isWithdrawing,
     WalletTransaction? pendingTransaction,
     List<PaymentMethod>? paymentMethods,
     @Default('MPESA') String selectedPaymentMethod,
+    String? transferSuccess,
+    String? withdrawalSuccess,
   }) = _WalletState;
 }
 
@@ -158,6 +163,132 @@ class WalletNotifier extends StateNotifier<WalletState> {
     }
   }
 
+  // NEW: Transfer tokens to another agent
+  Future<void> transferTokens({
+    required String toAgentId,
+    required double amount,
+    required String description,
+  }) async {
+    if (state.isTransferring) return;
+
+    state = state.copyWith(isTransferring: true, errorMessage: null, transferSuccess: null);
+
+    try {
+      // Get agent ID from auth state
+      final authState = _ref.read(authNotifierProvider);
+      final fromAgentId = authState.agent?.id ?? '';
+      
+      // Get device ID from secure storage
+      final deviceId = await SecureStorageManager.getDeviceId() ?? '';
+
+      if (fromAgentId.isEmpty) {
+        throw Exception('Agent ID not found. Please login again.');
+      }
+
+      if (fromAgentId == toAgentId) {
+        throw Exception('Cannot transfer to yourself');
+      }
+
+      // Check if sufficient balance
+      if (state.balance?.availableBalance == null || state.balance!.availableBalance < amount) {
+        throw Exception('Insufficient balance for transfer');
+      }
+
+      final request = TransferRequest(
+        fromAgentId: fromAgentId,
+        toAgentId: toAgentId,
+        amount: amount,
+        description: description,
+        deviceId: deviceId,
+      );
+
+      final transaction = await _walletRepository.transferTokens(request);
+
+      // Refresh balance and add transaction to list
+      final newBalance = await _walletRepository.getWalletBalance();
+      
+      // Get existing transactions
+      final existingTransactions = state.transactions ?? <WalletTransaction>[];
+      
+      state = state.copyWith(
+        isTransferring: false,
+        balance: newBalance,
+        transactions: [transaction, ...existingTransactions],
+        transferSuccess: 'Successfully transferred ${Formatters.formatCurrency(amount)}',
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isTransferring: false,
+        errorMessage: 'Transfer failed: ${e.toString()}',
+      );
+    }
+  }
+
+  // NEW: Withdraw tokens to M-Pesa
+  Future<void> withdrawTokens({
+    required double amount,
+    required String phoneNumber,
+    required String paymentMethod,
+    String? tillNumber,
+    String? paybillNumber,
+    String? accountNumber,
+    String? description,
+  }) async {
+    if (state.isWithdrawing) return;
+
+    state = state.copyWith(isWithdrawing: true, errorMessage: null, withdrawalSuccess: null);
+
+    try {
+      // Get agent ID from auth state
+      final authState = _ref.read(authNotifierProvider);
+      final agentId = authState.agent?.id ?? '';
+      
+      // Get device ID from secure storage
+      final deviceId = await SecureStorageManager.getDeviceId() ?? '';
+
+      if (agentId.isEmpty) {
+        throw Exception('Agent ID not found. Please login again.');
+      }
+
+      // Check if sufficient balance
+      if (state.balance?.availableBalance == null || state.balance!.availableBalance < amount) {
+        throw Exception('Insufficient balance for withdrawal');
+      }
+
+      final request = WithdrawalRequest(
+        agentId: agentId,
+        amount: amount,
+        phoneNumber: phoneNumber,
+        paymentMethod: paymentMethod,
+        deviceId: deviceId,
+        tillNumber: tillNumber,
+        paybillNumber: paybillNumber,
+        accountNumber: accountNumber,
+        description: description ?? 'Token withdrawal',
+      );
+
+      final transaction = await _walletRepository.withdrawTokens(request);
+
+      // Refresh balance and add transaction to list
+      final newBalance = await _walletRepository.getWalletBalance();
+      
+      // Get existing transactions
+      final existingTransactions = state.transactions ?? <WalletTransaction>[];
+      
+      state = state.copyWith(
+        isWithdrawing: false,
+        balance: newBalance,
+        transactions: [transaction, ...existingTransactions],
+        withdrawalSuccess: 'Successfully withdrew ${Formatters.formatCurrency(amount)}',
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isWithdrawing: false,
+        errorMessage: 'Withdrawal failed: ${e.toString()}',
+      );
+    }
+  }
+
   Future<void> confirmPayment(String transactionId) async {
     if (state.isConfirmingPayment) return;
 
@@ -203,7 +334,7 @@ class WalletNotifier extends StateNotifier<WalletState> {
   }
 
   void clearError() {
-    state = state.copyWith(errorMessage: null);
+    state = state.copyWith(errorMessage: null, transferSuccess: null, withdrawalSuccess: null);
   }
 }
 

@@ -46,6 +46,33 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     final state = ref.watch(walletNotifierProvider);
     final notifier = ref.read(walletNotifierProvider.notifier);
 
+    // Show success messages
+    if (state.transferSuccess != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(state.transferSuccess!),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        notifier.clearError();
+      });
+    }
+
+    if (state.withdrawalSuccess != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(state.withdrawalSuccess!),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        notifier.clearError();
+      });
+    }
+
     return Scaffold(
       appBar: const CustomAppBar(
         title: 'Wallet',
@@ -63,7 +90,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   const SizedBox(height: 20),
 
                   // Quick Actions
-                  _buildQuickActions(),
+                  _buildQuickActions(state),
                   const SizedBox(height: 20),
 
                   // Transactions Header
@@ -81,7 +108,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                         ),
                         TextButton(
                           onPressed: () {
-                            // TODO: Navigate to full transaction history
+                            context.push('/transaction-history');
                           },
                           child: const Text(
                             'View All',
@@ -123,7 +150,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.green.withOpacity(0.3),
+            color: Colors.green.withValues(alpha: 0.3),
             blurRadius: 10,
             spreadRadius: 2,
           ),
@@ -199,7 +226,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
   }
 
-  Widget _buildQuickActions() {
+  Widget _buildQuickActions(WalletState state) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
@@ -208,6 +235,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           _buildActionButton(
             icon: Icons.add,
             label: 'Top Up',
+            isLoading: state.isPurchasingTokens,
             onTap: () {
               context.push('/wallet/topup');
             },
@@ -215,22 +243,25 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           _buildActionButton(
             icon: Icons.history,
             label: 'History',
+            isLoading: false,
             onTap: () {
-              // TODO: Navigate to full history
+              context.push('/transaction-history');
             },
           ),
           _buildActionButton(
             icon: Icons.share,
             label: 'Transfer',
+            isLoading: state.isTransferring,
             onTap: () {
-              // TODO: Implement transfer
+              _showTransferDialog(state);
             },
           ),
           _buildActionButton(
             icon: Icons.download,
             label: 'Withdraw',
+            isLoading: state.isWithdrawing,
             onTap: () {
-              // TODO: Implement withdrawal
+              _showWithdrawalDialog(state);
             },
           ),
         ],
@@ -241,6 +272,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   Widget _buildActionButton({
     required IconData icon,
     required String label,
+    required bool isLoading,
     required VoidCallback onTap,
   }) {
     return Column(
@@ -249,13 +281,21 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           width: 60,
           height: 60,
           decoration: BoxDecoration(
-            color: const Color(0xFF00C853).withOpacity(0.1),
+            color: const Color(0xFF00C853).withValues(alpha: 0.1),
             shape: BoxShape.circle,
           ),
-          child: IconButton(
-            icon: Icon(icon, color: const Color(0xFF00C853)),
-            onPressed: onTap,
-          ),
+          child: isLoading
+              ? const Padding(
+                  padding: EdgeInsets.all(15),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFF00C853),
+                  ),
+                )
+              : IconButton(
+                  icon: Icon(icon, color: const Color(0xFF00C853)),
+                  onPressed: onTap,
+                ),
         ),
         const SizedBox(height: 8),
         Text(
@@ -263,6 +303,223 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
         ),
       ],
+    );
+  }
+
+  void _showTransferDialog(WalletState state) {
+    final amountController = TextEditingController();
+    final agentIdController = TextEditingController();
+    final descriptionController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Transfer Tokens'),
+        content: Form(
+          key: formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: agentIdController,
+                  decoration: const InputDecoration(
+                    labelText: 'Recipient Agent ID',
+                    hintText: 'Enter agent ID',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter recipient agent ID';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: amountController,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Amount',
+                    hintText: 'Enter amount',
+                    prefixText: 'KES ',
+                    border: const OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter amount';
+                    }
+                    final amount = double.tryParse(value);
+                    if (amount == null || amount <= 0) {
+                      return 'Please enter a valid amount';
+                    }
+                    if (state.balance?.availableBalance != null && 
+                        amount > state.balance!.availableBalance) {
+                      return 'Insufficient balance';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: descriptionController,
+                  decoration: const InputDecoration(
+                    labelText: 'Description (Optional)',
+                    hintText: 'Enter description',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (!formKey.currentState!.validate()) return;
+              
+              Navigator.pop(dialogContext);
+              
+              final amount = double.parse(amountController.text);
+              await ref.read(walletNotifierProvider.notifier).transferTokens(
+                toAgentId: agentIdController.text,
+                amount: amount,
+                description: descriptionController.text.isNotEmpty 
+                    ? descriptionController.text 
+                    : 'Token transfer',
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00C853),
+            ),
+            child: const Text('Transfer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showWithdrawalDialog(WalletState state) {
+    final amountController = TextEditingController();
+    final phoneController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    String selectedMethod = 'MPESA_TILL';
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Withdraw Tokens'),
+            content: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: phoneController,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(
+                        labelText: 'Phone Number',
+                        hintText: '07XX XXX XXX',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter phone number';
+                        }
+                        if (!RegExp(r'^07\d{8}$').hasMatch(value)) {
+                          return 'Enter a valid Safaricom number';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: selectedMethod,
+                      decoration: const InputDecoration(
+                        labelText: 'Payment Method',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'MPESA_TILL',
+                          child: Text('M-Pesa Till Number'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'MPESA_PAYBILL',
+                          child: Text('M-Pesa PayBill'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          selectedMethod = value!;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: amountController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: 'Amount',
+                        hintText: 'Enter amount',
+                        prefixText: 'KES ',
+                        border: const OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter amount';
+                        }
+                        final amount = double.tryParse(value);
+                        if (amount == null || amount <= 0) {
+                          return 'Please enter a valid amount';
+                        }
+                        if (state.balance?.availableBalance != null && 
+                            amount > state.balance!.availableBalance) {
+                          return 'Insufficient balance';
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  if (!formKey.currentState!.validate()) return;
+                  
+                  Navigator.pop(dialogContext);
+                  
+                  final amount = double.parse(amountController.text);
+                  await ref.read(walletNotifierProvider.notifier).withdrawTokens(
+                    amount: amount,
+                    phoneNumber: phoneController.text,
+                    paymentMethod: selectedMethod,
+                    description: 'Token withdrawal',
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00C853),
+                ),
+                child: const Text('Withdraw'),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -318,7 +575,6 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   Widget _buildTransactionItem(WalletTransaction transaction) {
     final isSuccess = transaction.status == WalletTransactionStatus.success;
     final isPending = transaction.status == WalletTransactionStatus.pending;
-    final isFailed = transaction.status == WalletTransactionStatus.failed;
 
     Color color;
     IconData icon;
@@ -341,7 +597,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             shape: BoxShape.circle,
           ),
           child: Icon(icon, color: color),
@@ -358,6 +614,10 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               DateFormat('dd MMM, HH:mm').format(transaction.timestamp),
               style: const TextStyle(fontSize: 12),
             ),
+            if (transaction.recipientAgentId != null)
+              Text('To: ${transaction.recipientAgentId}', style: const TextStyle(fontSize: 10)),
+            if (transaction.recipientPhone != null)
+              Text('To: ${transaction.recipientPhone}', style: const TextStyle(fontSize: 10)),
           ],
         ),
         trailing: Column(
@@ -385,4 +645,6 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       ),
     );
   }
+
+  // Removed duplicate dispose method
 }
