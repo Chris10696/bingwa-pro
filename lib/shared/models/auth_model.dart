@@ -1,10 +1,9 @@
+// lib/shared/models/auth_model.dart
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'auth_model.freezed.dart';
 part 'auth_model.g.dart';
 
-// Define AgentStatus here to avoid circular imports
-// Or keep it in agent_model.dart and use string for now
 enum AgentAuthStatus {
   @JsonValue('PENDING')
   pending,
@@ -47,10 +46,12 @@ abstract class LoginResponse with _$LoginResponse {
       _$LoginResponseFromJson(json);
 }
 
-// Agent Profile (Keep it here but simplified)
+// ===== AGENT PROFILE - SINGLE SOURCE OF TRUTH =====
+// ALL FIELDS MUST BE NON-NULLABLE with defaults where appropriate
 @freezed
 abstract class AgentProfile with _$AgentProfile {
   const factory AgentProfile({
+    // Required fields - all non-nullable
     required String id,
     required String fullName,
     required String phoneNumber,
@@ -59,22 +60,37 @@ abstract class AgentProfile with _$AgentProfile {
     required AgentAuthStatus status,
     required double tokenBalance,
     required DateTime registeredAt,
+    
+    // Optional fields - nullable
     DateTime? lastLoginAt,
-    @Default('') String nationalId,
-    @Default('') String agentCode,
-    @Default('') String businessName,
-    @Default('') String location,
-    @Default(0.0) double totalCommission,
-    @Default(0) int totalTransactions,
-    @Default(0.0) double successRate,
+    String? nationalId,
+    String? agentCode,
+    String? businessName,
+    String? location,
+    double? totalCommission,
+    int? totalTransactions,
+    double? successRate,
+    
+    // ===== PAYMENT FIELDS - ALL NULLABLE =====
+    String? tillNumber,
+    String? paybillNumber,
+    String? paybillAccount,
+    bool? tillNumberVerified,
+    DateTime? tillNumberVerifiedAt,
+    String? tillNumberStatus,
+    String? defaultPaymentMethod,
+    Map<String, dynamic>? paymentSettings,
+    // ========================================
+    
     Map<String, dynamic>? metadata,
   }) = _AgentProfile;
 
   factory AgentProfile.fromJson(Map<String, dynamic> json) =>
       _$AgentProfileFromJson(json);
 }
+// ================================================
 
-// Agent Update Request (Keep only one - in auth_model)
+// Agent Update Request
 @freezed
 abstract class AgentUpdateRequest with _$AgentUpdateRequest {
   const factory AgentUpdateRequest({
@@ -117,7 +133,7 @@ abstract class RegistrationResponse with _$RegistrationResponse {
   const factory RegistrationResponse({
     required String message,
     required String agentId,
-    String? verificationToken,  // Make it nullable instead of default
+    String? verificationToken,
     DateTime? verificationExpiry,
     @Default(false) bool requiresManualApproval,
   }) = _RegistrationResponse;

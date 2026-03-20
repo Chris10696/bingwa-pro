@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { AgentsService } from './agents.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AgentStatus } from './entities/agent.entity';
 
 @Controller('agents')
 export class AgentsController {
@@ -62,7 +63,7 @@ export class AgentsController {
   @UseGuards(JwtAuthGuard)
   async updateStatus(
     @Param('id') id: string,
-    @Body('status') status: 'ACTIVE' | 'SUSPENDED',
+    @Body('status') status: AgentStatus,
   ) {
     return this.agentsService.updateStatus(id, status);
   }

@@ -1,11 +1,11 @@
+// lib/shared/models/agent_model.dart
 import 'package:freezed_annotation/freezed_annotation.dart';
+import 'auth_model.dart'; // Import AgentProfile from auth_model
 
 part 'agent_model.freezed.dart';
 part 'agent_model.g.dart';
 
-// Agent Status Enum (Keep it separate from auth)
-// Note: This is a duplicate of AgentAuthStatus, but we need it here
-// We'll use string conversions to handle compatibility
+// Agent Status Enum (for detailed profile, different from auth status)
 enum AgentStatus {
   @JsonValue('PENDING')
   pending,
@@ -49,7 +49,7 @@ abstract class AgentActivity with _$AgentActivity {
   const factory AgentActivity({
     required String id,
     required String agentId,
-    required String activityType, // LOGIN, LOGOUT, TRANSACTION, TOPUP, etc.
+    required String activityType,
     required String description,
     required DateTime timestamp,
     String? ipAddress,
@@ -89,9 +89,9 @@ abstract class AgentDocument with _$AgentDocument {
   const factory AgentDocument({
     required String id,
     required String agentId,
-    required String documentType, // ID_CARD, SELFIE, BUSINESS_LICENSE, etc.
+    required String documentType,
     required String documentUrl,
-    required String status, // PENDING, APPROVED, REJECTED
+    required String status,
     required DateTime uploadedAt,
     DateTime? verifiedAt,
     String? verifiedBy,
@@ -121,11 +121,15 @@ abstract class AgentTier with _$AgentTier {
       _$AgentTierFromJson(json);
 }
 
-// Enhanced Agent Profile for agent operations (Not for auth)
-// This is a different class from auth_model's AgentProfile
+// ===== REMOVED DUPLICATE AgentProfile =====
+// The AgentProfile is now imported from auth_model.dart
+// ==========================================
+
+// Agent Detailed Profile
 @freezed
 abstract class AgentDetailedProfile with _$AgentDetailedProfile {
   const factory AgentDetailedProfile({
+    // Basic fields - match AgentProfile but with AgentStatus
     required String id,
     required String fullName,
     required String phoneNumber,
@@ -135,13 +139,25 @@ abstract class AgentDetailedProfile with _$AgentDetailedProfile {
     required double tokenBalance,
     required DateTime registeredAt,
     DateTime? lastLoginAt,
-    @Default('') String nationalId,
-    @Default('') String agentCode,
-    @Default('') String businessName,
-    @Default('') String location,
-    @Default(0.0) double totalCommission,
-    @Default(0) int totalTransactions,
-    @Default(0.0) double successRate,
+    String? nationalId,
+    String? agentCode,
+    String? businessName,
+    String? location,
+    double? totalCommission,
+    int? totalTransactions,
+    double? successRate,
+    
+    // Payment fields
+    String? tillNumber,
+    String? paybillNumber,
+    String? paybillAccount,
+    bool? tillNumberVerified,
+    DateTime? tillNumberVerifiedAt,
+    String? tillNumberStatus,
+    String? defaultPaymentMethod,
+    Map<String, dynamic>? paymentSettings,
+    
+    // Additional detailed fields
     AgentStats? stats,
     AgentSettings? settings,
     List<AgentDocument>? documents,
@@ -153,7 +169,7 @@ abstract class AgentDetailedProfile with _$AgentDetailedProfile {
       _$AgentDetailedProfileFromJson(json);
 }
 
-// Agent List Response - Use AgentDetailedProfile instead
+// Agent List Response
 @freezed
 abstract class AgentListResponse with _$AgentListResponse {
   const factory AgentListResponse({
@@ -167,5 +183,3 @@ abstract class AgentListResponse with _$AgentListResponse {
   factory AgentListResponse.fromJson(Map<String, dynamic> json) =>
       _$AgentListResponseFromJson(json);
 }
-
-// Remove the duplicate AgentUpdateRequest since it's in auth_model.dart

@@ -1,14 +1,13 @@
 import { Injectable, ConflictException, BadRequestException, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { Agent } from '../agents/entities/agent.entity';
+import { Agent, AgentStatus } from '../agents/entities/agent.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import * as bcrypt from 'bcrypt';
 import { RegisterAgentDto } from './dto/register-agent.dto';
 import { JwtService } from '@nestjs/jwt';
 import { LoginAgentDto } from './dto/login-agent.dto';
 import { LoginResponseDto } from './dto/login-response.dto';
-
 
 @Injectable()
 export class AuthService {
@@ -47,7 +46,7 @@ export class AuthService {
 
     // Hash the PIN
     const saltRounds = 10;
-    const pinHash = await bcrypt.hash(registerDto.pin, saltRounds);
+    const hashedPin = await bcrypt.hash(registerDto.pin, saltRounds);
 
     // Use QueryRunner for transaction (atomic operation)
     const queryRunner = this.dataSource.createQueryRunner();
@@ -55,18 +54,18 @@ export class AuthService {
     await queryRunner.startTransaction();
 
     try {
-      // Create agent - FIXED: Handle null values properly
+      // Create agent - using updated entity with all fields
       const agent = new Agent();
       agent.fullName = registerDto.fullName;
       agent.phoneNumber = registerDto.phoneNumber;
       agent.nationalId = registerDto.nationalId;
-      agent.email = registerDto.email || ''; // Convert null to empty string
-      agent.pinHash = pinHash;
-      agent.businessName = registerDto.businessName || ''; // Convert null to empty string
-      agent.location = registerDto.location || ''; // Convert null to empty string
-      agent.deviceId = registerDto.deviceId;
-      agent.platform = registerDto.platform;
-      agent.status = 'PENDING';
+      agent.email = registerDto.email || " ";
+      agent.pinHash = hashedPin; // Now this exists in entity
+      agent.businessName = registerDto.businessName || " ";
+      agent.location = registerDto.location || " ";
+      agent.status = AgentStatus.PENDING;
+      agent.deviceId = registerDto.deviceId; // Now this exists in entity
+      agent.platform = registerDto.platform || 'android'; // Now this exists in entity
 
       const savedAgent = await queryRunner.manager.save(agent);
 
@@ -74,6 +73,11 @@ export class AuthService {
       const wallet = new Wallet();
       wallet.agent = savedAgent;
       wallet.tokenBalance = 0;
+      wallet.tokenBalanceInt = 0;
+      wallet.lifetimeTokens = 0;
+      wallet.tokensConsumed = 0;
+      wallet.isProcessing = false;
+      wallet.processingMode = 'express';
 
       await queryRunner.manager.save(wallet);
 
@@ -96,65 +100,65 @@ export class AuthService {
   }
 
   async login(loginDto: LoginAgentDto): Promise<LoginResponseDto> {
-  // Find agent by phone number
-  const agent = await this.agentsRepository.findOne({
-    where: { phoneNumber: loginDto.phoneNumber },
-    relations: ['wallet'],
-  });
-  
-  if (!agent) {
-    throw new UnauthorizedException('Invalid phone number or PIN');
-  }
-  
-  // Check if agent is active
-  if (agent.status !== 'ACTIVE') {
-    throw new UnauthorizedException(`Account is ${agent.status.toLowerCase()}. Please contact support.`);
-  }
-  
-  // Verify PIN
-  const isPinValid = await bcrypt.compare(loginDto.pin, agent.pinHash);
-  if (!isPinValid) {
-    throw new UnauthorizedException('Invalid phone number or PIN');
-  }
-  
-  // Update device ID if changed
-  if (agent.deviceId !== loginDto.deviceId) {
-    agent.deviceId = loginDto.deviceId;
-    await this.agentsRepository.save(agent);
-  }
-  
-  // Generate JWT tokens
-  const payload = {
-    sub: agent.id,
-    phoneNumber: agent.phoneNumber,
-    status: agent.status,
-  };
-  
-  const accessToken = this.jwtService.sign(payload, {
-    expiresIn: '7d',
-  });
-  
-  const refreshToken = this.jwtService.sign(payload, {
-    expiresIn: '30d',
-  });
-  
-  // Calculate expiry
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 7);
-  
-  return {
-    accessToken,
-    refreshToken,
-    expiresAt,
-    agent: {
-      id: agent.id,
-      fullName: agent.fullName,
+    // Find agent by phone number
+    const agent = await this.agentsRepository.findOne({
+      where: { phoneNumber: loginDto.phoneNumber },
+      relations: ['wallet'],
+    });
+    
+    if (!agent) {
+      throw new UnauthorizedException('Invalid phone number or PIN');
+    }
+    
+    // Check if agent is active
+    if (agent.status !== AgentStatus.ACTIVE) {
+      throw new UnauthorizedException(`Account is ${agent.status}. Please contact support.`);
+    }
+    
+    // Verify PIN - using pinHash (now exists)
+    const isPinValid = await bcrypt.compare(loginDto.pin, agent.pinHash);
+    if (!isPinValid) {
+      throw new UnauthorizedException('Invalid phone number or PIN');
+    }
+    
+    // Update device ID if changed (deviceId now exists)
+    if (agent.deviceId !== loginDto.deviceId) {
+      agent.deviceId = loginDto.deviceId;
+      await this.agentsRepository.save(agent);
+    }
+    
+    // Generate JWT tokens
+    const payload = {
+      sub: agent.id,
       phoneNumber: agent.phoneNumber,
-      email: agent.email || '',
       status: agent.status,
-      tokenBalance: agent.wallet?.tokenBalance || 0,
-    },
-    requiresBiometricSetup: false,
-  };
-}
+    };
+    
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn: '7d',
+    });
+    
+    const refreshToken = this.jwtService.sign(payload, {
+      expiresIn: '30d',
+    });
+    
+    // Calculate expiry
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+    
+    return {
+      accessToken,
+      refreshToken,
+      expiresAt,
+      agent: {
+        id: agent.id,
+        fullName: agent.fullName,
+        phoneNumber: agent.phoneNumber,
+        email: agent.email || '',
+        status: agent.status,
+        tokenBalance: agent.wallet?.tokenBalance || 0,
+      },
+      requiresBiometricSetup: false,
+    };
+  }
 }

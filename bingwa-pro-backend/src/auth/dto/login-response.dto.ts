@@ -9,6 +9,11 @@ export class LoginResponseDto {
     email: string;
     status: string;
     tokenBalance: number;
+    // Add these if you want them in the response
+    tillNumber?: string;
+    paybillNumber?: string;
+    tillNumberVerified?: boolean;
+    tillNumberStatus?: string;
   };
   requiresBiometricSetup: boolean;
 }

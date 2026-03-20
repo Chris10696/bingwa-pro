@@ -1,3 +1,4 @@
+// lib/shared/repositories/auth_repository.dart
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/network/dio_client.dart';
@@ -71,7 +72,7 @@ class AuthRepository {
         // Parse agent data
         final agentData = data['agent'] as Map<String, dynamic>? ?? {};
         
-        // Create agent profile manually
+        // Create agent profile manually with all fields including payment fields
         final agent = AgentProfile(
           id: agentData['id']?.toString() ?? '',
           fullName: agentData['fullName']?.toString() ?? '',
@@ -83,13 +84,30 @@ class AuthRepository {
               : 0.0),
           registeredAt: DateTime.now(),
           lastLoginAt: DateTime.now(),
-          nationalId: '',
-          agentCode: '',
-          businessName: '',
-          location: '',
-          totalCommission: 0.0,
-          totalTransactions: 0,
-          successRate: 0.0,
+          nationalId: agentData['nationalId']?.toString() ?? '',
+          agentCode: agentData['agentCode']?.toString() ?? '',
+          businessName: agentData['businessName']?.toString() ?? '',
+          location: agentData['location']?.toString() ?? '',
+          totalCommission: (agentData['totalCommission'] is num 
+              ? (agentData['totalCommission'] as num).toDouble() 
+              : 0.0),
+          totalTransactions: agentData['totalTransactions'] as int? ?? 0,
+          successRate: (agentData['successRate'] is num 
+              ? (agentData['successRate'] as num).toDouble() 
+              : 0.0),
+          // ===== PAYMENT FIELDS =====
+          tillNumber: agentData['tillNumber']?.toString(),
+          paybillNumber: agentData['paybillNumber']?.toString(),
+          paybillAccount: agentData['paybillAccount']?.toString(),
+          tillNumberVerified: agentData['tillNumberVerified'] as bool?,
+          tillNumberVerifiedAt: agentData['tillNumberVerifiedAt'] != null 
+              ? DateTime.tryParse(agentData['tillNumberVerifiedAt'].toString()) 
+              : null,
+          tillNumberStatus: agentData['tillNumberStatus']?.toString(),
+          defaultPaymentMethod: agentData['defaultPaymentMethod']?.toString(),
+          paymentSettings: agentData['paymentSettings'] as Map<String, dynamic>?,
+          // ==========================
+          metadata: agentData['metadata'] as Map<String, dynamic>?,
         );
         
         // Parse expiry date
@@ -246,13 +264,30 @@ class AuthRepository {
               : 0.0),
           registeredAt: DateTime.now(),
           lastLoginAt: DateTime.now(),
-          nationalId: '',
-          agentCode: '',
-          businessName: '',
-          location: '',
-          totalCommission: 0.0,
-          totalTransactions: 0,
-          successRate: 0.0,
+          nationalId: agentData['nationalId']?.toString() ?? '',
+          agentCode: agentData['agentCode']?.toString() ?? '',
+          businessName: agentData['businessName']?.toString() ?? '',
+          location: agentData['location']?.toString() ?? '',
+          totalCommission: (agentData['totalCommission'] is num 
+              ? (agentData['totalCommission'] as num).toDouble() 
+              : 0.0),
+          totalTransactions: agentData['totalTransactions'] as int? ?? 0,
+          successRate: (agentData['successRate'] is num 
+              ? (agentData['successRate'] as num).toDouble() 
+              : 0.0),
+          // ===== PAYMENT FIELDS =====
+          tillNumber: agentData['tillNumber']?.toString(),
+          paybillNumber: agentData['paybillNumber']?.toString(),
+          paybillAccount: agentData['paybillAccount']?.toString(),
+          tillNumberVerified: agentData['tillNumberVerified'] as bool?,
+          tillNumberVerifiedAt: agentData['tillNumberVerifiedAt'] != null 
+              ? DateTime.tryParse(agentData['tillNumberVerifiedAt'].toString()) 
+              : null,
+          tillNumberStatus: agentData['tillNumberStatus']?.toString(),
+          defaultPaymentMethod: agentData['defaultPaymentMethod']?.toString(),
+          paymentSettings: agentData['paymentSettings'] as Map<String, dynamic>?,
+          // ==========================
+          metadata: agentData['metadata'] as Map<String, dynamic>?,
         );
         
         DateTime expiresAt;
@@ -330,9 +365,11 @@ class AuthRepository {
         return RegistrationResponse(
           message: response.data['message']?.toString() ?? 'Registration successful',
           agentId: response.data['agentId']?.toString() ?? '',
-          verificationToken: null,
-          verificationExpiry: null,
-          requiresManualApproval: true,
+          verificationToken: response.data['verificationToken']?.toString(),
+          verificationExpiry: response.data['verificationExpiry'] != null 
+              ? DateTime.tryParse(response.data['verificationExpiry'].toString())
+              : null,
+          requiresManualApproval: response.data['requiresManualApproval'] == true,
         );
       }
     } on DioException catch (e) {

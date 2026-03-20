@@ -1,3 +1,4 @@
+import 'package:bingwa_pro/features/dashboard/presentation/providers/processing_provider.dart';
 import 'package:bingwa_pro/features/transactions/presentation/providers/transaction_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -106,10 +107,126 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
           ],
         ),
       ),
-      floatingActionButton: _buildFloatingActionButton(state, notifier),
+      floatingActionButton: _buildProcessingFAB(),
       bottomNavigationBar: _buildBottomNavigation(),
     );
   }
+
+  Widget _buildProcessingFAB() {
+  final processingState = ref.watch(processingProvider);
+  final processingNotifier = ref.read(processingProvider.notifier);
+  
+  if (processingState.status == ProcessingStatus.running) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withValues(alpha: 0.3), // FIXED
+                blurRadius: 5,
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(
+                  color: Colors.green,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Processing: ${processingState.transactionsProcessed} txns',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        FloatingActionButton(
+          onPressed: () => processingNotifier.pauseProcessing(),
+          backgroundColor: Colors.orange,
+          child: const Icon(Icons.pause),
+        ),
+        const SizedBox(height: 10),
+        FloatingActionButton(
+          onPressed: () => processingNotifier.stopProcessing(),
+          backgroundColor: Colors.red,
+          child: const Icon(Icons.stop),
+        ),
+      ],
+    );
+  }
+  
+  if (processingState.status == ProcessingStatus.paused) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withValues(alpha: 0.3), // FIXED
+                blurRadius: 5,
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(
+                  color: Colors.orange,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Paused',
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        FloatingActionButton(
+          onPressed: () => processingNotifier.startProcessing(),
+          backgroundColor: const Color(0xFF00C853),
+          child: const Icon(Icons.play_arrow),
+        ),
+        const SizedBox(height: 10),
+        FloatingActionButton(
+          onPressed: () => processingNotifier.stopProcessing(),
+          backgroundColor: Colors.red,
+          mini: true,
+          child: const Icon(Icons.stop),
+        ),
+      ],
+    );
+  }
+  
+  return FloatingActionButton(
+    onPressed: () => processingNotifier.startProcessing(),
+    backgroundColor: const Color(0xFF00C853),
+    child: const Icon(Icons.play_arrow),
+  );
+}
   
   Widget _buildDrawer(DashboardState state) {
     return Drawer(
@@ -1283,7 +1400,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
     );
   }
   
-  Widget _buildFloatingActionButton(DashboardState state, DashboardNotifier notifier) {
+  /*Widget _buildFloatingActionButton(DashboardState state, DashboardNotifier notifier) {
     if (state.isProcessing) {
       return Column(
         mainAxisSize: MainAxisSize.min,
@@ -1308,7 +1425,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with SingleTi
       backgroundColor: const Color(0xFF00C853),
       child: const Icon(Icons.play_arrow),
     );
-  }
+  }*/
   
   Widget _buildBottomNavigation() {
     return BottomNavigationBar(

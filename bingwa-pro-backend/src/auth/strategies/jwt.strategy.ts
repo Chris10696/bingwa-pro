@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AgentsService } from '../../agents/agents.service';
+import { AgentStatus } from '../../agents/entities/agent.entity'; // ADD THIS IMPORT
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -29,7 +30,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         throw new UnauthorizedException('Agent not found');
       }
       
-      if (agent.status !== 'ACTIVE') {
+      // FIXED: Use enum comparison, not string literal
+      if (agent.status !== AgentStatus.ACTIVE) {
         throw new UnauthorizedException(`Account is ${agent.status.toLowerCase()}`);
       }
       

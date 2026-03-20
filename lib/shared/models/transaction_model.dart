@@ -128,7 +128,7 @@ abstract class TransactionDetails with _$TransactionDetails {
     bool? isAutoRetry,
     int? retryCount,
     String? parentTransactionId,
-    Map<String, dynamic>? auditLogs,
+    Map<String, dynamic>? auditLogs, required String reference,
   }) = _TransactionDetails;
 
   factory TransactionDetails.fromJson(Map<String, dynamic> json) =>

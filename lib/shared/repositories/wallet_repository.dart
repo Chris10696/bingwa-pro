@@ -1,3 +1,5 @@
+// lib/shared/repositories/wallet_repository.dart
+import 'package:bingwa_pro/shared/models/payment_notification.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/network/dio_client.dart';
@@ -458,6 +460,137 @@ class WalletRepository {
       rethrow;
     }
   }
+
+  // ===== FIXED: Moved these methods INSIDE the class =====
+  
+  // Check for payments
+  Future<List<PaymentNotification>> checkForPayments({
+    String? tillNumber,
+    String? paybillNumber,
+    DateTime? lastCheckTime,
+  }) async {
+    try {
+      final request = <String, dynamic>{
+        'tillNumber': tillNumber,
+        'paybillNumber': paybillNumber,
+        'lastCheckTime': lastCheckTime?.toIso8601String(),
+      };
+      
+      AppLogger.logNetworkRequest(
+        method: 'POST',
+        url: '/wallet/check-payments',
+        data: request,
+      );
+      
+      final response = await _dio.post(
+        '/wallet/check-payments',
+        data: request,
+      );
+      
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: '/wallet/check-payments',
+        data: response.data,
+      );
+      
+      final payments = (response.data['payments'] as List)
+          .map((json) => PaymentNotification.fromJson(json))
+          .toList();
+      
+      return payments;
+    } on DioException catch (e) {
+      AppLogger.e('Failed to check for payments:', e);
+      return [];
+    } catch (e) {
+      AppLogger.e('Failed to check for payments:', e);
+      return [];
+    }
+  }
+  
+  // Deduct tokens
+  Future<void> deductTokens({
+    required int amount,
+    required String transactionId,
+    required String customerPhone,
+    required String productId,
+  }) async {
+    try {
+      final request = <String, dynamic>{
+        'amount': amount,
+        'transactionId': transactionId,
+        'customerPhone': customerPhone,
+        'productId': productId,
+      };
+      
+      AppLogger.logNetworkRequest(
+        method: 'POST',
+        url: '/wallet/deduct-tokens',
+        data: request,
+      );
+      
+      final response = await _dio.post(
+        '/wallet/deduct-tokens',
+        data: request,
+      );
+      
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: '/wallet/deduct-tokens',
+        data: response.data,
+      );
+    } on DioException catch (e) {
+      AppLogger.e('Failed to deduct tokens:', e);
+      rethrow;
+    } catch (e) {
+      AppLogger.e('Failed to deduct tokens:', e);
+      rethrow;
+    }
+  }
+  
+  // Update payment settings
+  Future<void> updatePaymentSettings({
+    required String agentId,
+    String? tillNumber,
+    String? paybillNumber,
+    String? paybillAccount,
+    required String method,
+    required bool autoDetect,
+  }) async {
+    try {
+      final request = <String, dynamic>{
+        'agentId': agentId,
+        'tillNumber': tillNumber,
+        'paybillNumber': paybillNumber,
+        'paybillAccount': paybillAccount,
+        'method': method,
+        'autoDetect': autoDetect,
+      };
+      
+      AppLogger.logNetworkRequest(
+        method: 'POST',
+        url: '/agents/payment-settings',
+        data: request,
+      );
+      
+      final response = await _dio.post(
+        '/agents/payment-settings',
+        data: request,
+      );
+      
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: '/agents/payment-settings',
+        data: response.data,
+      );
+    } on DioException catch (e) {
+      AppLogger.e('Failed to update payment settings:', e);
+      rethrow;
+    } catch (e) {
+      AppLogger.e('Failed to update payment settings:', e);
+      rethrow;
+    }
+  }
+  // ======================================================
 }
 
 // Provider

@@ -1,4 +1,6 @@
+// lib/features/wallet/presentation/providers/wallet_provider.dart
 import 'package:bingwa_pro/core/utils/formatters.dart';
+import 'package:bingwa_pro/core/utils/logger.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import '../../../../shared/models/wallet_model.dart';
@@ -74,10 +76,8 @@ class WalletNotifier extends StateNotifier<WalletState> {
         offset: nextPage * 10,
       );
 
-      // Get existing transactions or create empty list of correct type
       final existingTransactions = state.transactions ?? <WalletTransaction>[];
       
-      // Create new list with proper type
       final List<WalletTransaction> allTransactions = [
         ...existingTransactions,
         ...moreTransactions,
@@ -115,11 +115,9 @@ class WalletNotifier extends StateNotifier<WalletState> {
     state = state.copyWith(isPurchasingTokens: true, errorMessage: null);
 
     try {
-      // Get agent ID from auth state
       final authState = _ref.read(authNotifierProvider);
       final agentId = authState.agent?.id ?? '';
       
-      // Get device ID from secure storage
       final deviceId = await SecureStorageManager.getDeviceId() ?? '';
 
       if (agentId.isEmpty) {
@@ -139,14 +137,12 @@ class WalletNotifier extends StateNotifier<WalletState> {
 
       final transaction = await _walletRepository.purchaseTokens(request);
 
-      // Update balance and transactions
       final newBalance = state.balance?.copyWith(
         availableBalance: (state.balance?.availableBalance ?? 0) + amount,
         totalBalance: (state.balance?.totalBalance ?? 0) + amount,
         lastUpdated: DateTime.now(),
       );
 
-      // Get existing transactions with proper type
       final existingTransactions = state.transactions ?? <WalletTransaction>[];
       
       state = state.copyWith(
@@ -163,7 +159,7 @@ class WalletNotifier extends StateNotifier<WalletState> {
     }
   }
 
-  // NEW: Transfer tokens to another agent
+  // Transfer tokens to another agent
   Future<void> transferTokens({
     required String toAgentId,
     required double amount,
@@ -174,11 +170,9 @@ class WalletNotifier extends StateNotifier<WalletState> {
     state = state.copyWith(isTransferring: true, errorMessage: null, transferSuccess: null);
 
     try {
-      // Get agent ID from auth state
       final authState = _ref.read(authNotifierProvider);
       final fromAgentId = authState.agent?.id ?? '';
       
-      // Get device ID from secure storage
       final deviceId = await SecureStorageManager.getDeviceId() ?? '';
 
       if (fromAgentId.isEmpty) {
@@ -189,7 +183,6 @@ class WalletNotifier extends StateNotifier<WalletState> {
         throw Exception('Cannot transfer to yourself');
       }
 
-      // Check if sufficient balance
       if (state.balance?.availableBalance == null || state.balance!.availableBalance < amount) {
         throw Exception('Insufficient balance for transfer');
       }
@@ -204,10 +197,8 @@ class WalletNotifier extends StateNotifier<WalletState> {
 
       final transaction = await _walletRepository.transferTokens(request);
 
-      // Refresh balance and add transaction to list
       final newBalance = await _walletRepository.getWalletBalance();
       
-      // Get existing transactions
       final existingTransactions = state.transactions ?? <WalletTransaction>[];
       
       state = state.copyWith(
@@ -224,7 +215,7 @@ class WalletNotifier extends StateNotifier<WalletState> {
     }
   }
 
-  // NEW: Withdraw tokens to M-Pesa
+  // Withdraw tokens to M-Pesa
   Future<void> withdrawTokens({
     required double amount,
     required String phoneNumber,
@@ -239,18 +230,15 @@ class WalletNotifier extends StateNotifier<WalletState> {
     state = state.copyWith(isWithdrawing: true, errorMessage: null, withdrawalSuccess: null);
 
     try {
-      // Get agent ID from auth state
       final authState = _ref.read(authNotifierProvider);
       final agentId = authState.agent?.id ?? '';
       
-      // Get device ID from secure storage
       final deviceId = await SecureStorageManager.getDeviceId() ?? '';
 
       if (agentId.isEmpty) {
         throw Exception('Agent ID not found. Please login again.');
       }
 
-      // Check if sufficient balance
       if (state.balance?.availableBalance == null || state.balance!.availableBalance < amount) {
         throw Exception('Insufficient balance for withdrawal');
       }
@@ -269,10 +257,8 @@ class WalletNotifier extends StateNotifier<WalletState> {
 
       final transaction = await _walletRepository.withdrawTokens(request);
 
-      // Refresh balance and add transaction to list
       final newBalance = await _walletRepository.getWalletBalance();
       
-      // Get existing transactions
       final existingTransactions = state.transactions ?? <WalletTransaction>[];
       
       state = state.copyWith(
@@ -289,6 +275,56 @@ class WalletNotifier extends StateNotifier<WalletState> {
     }
   }
 
+  // ===== NEW METHOD: Deduct Tokens (Called by processing provider) =====
+  Future<void> deductTokens({
+    required int amount,
+    required String transactionId,
+    required String customerPhone,
+    required String productId,
+  }) async {
+    if (state.isLoading) return;
+
+    state = state.copyWith(isLoading: true, errorMessage: null);
+
+    try {
+      // Call repository to deduct tokens
+      await _walletRepository.deductTokens(
+        amount: amount,
+        transactionId: transactionId,
+        customerPhone: customerPhone,
+        productId: productId,
+      );
+
+      // Refresh balance after deduction
+      final newBalance = await _walletRepository.getWalletBalance();
+      
+      // Refresh transactions to show the deduction
+      final transactions = await _walletRepository.getWalletTransactions(limit: 10);
+
+      state = state.copyWith(
+        isLoading: false,
+        balance: newBalance,
+        transactions: transactions,
+        hasMore: transactions.length >= 10,
+      );
+
+      AppLogger.logTransaction(
+        type: 'Token Deduction',
+        phone: customerPhone,
+        amount: amount.toDouble(),
+        status: 'SUCCESS',
+        reference: transactionId,
+      );
+    } catch (e) {
+      AppLogger.e('Failed to deduct tokens:', e);
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: 'Failed to deduct tokens: ${e.toString()}',
+      );
+    }
+  }
+  // =====================================================================
+
   Future<void> confirmPayment(String transactionId) async {
     if (state.isConfirmingPayment) return;
 
@@ -297,7 +333,6 @@ class WalletNotifier extends StateNotifier<WalletState> {
     try {
       final confirmation = await _walletRepository.confirmPayment(transactionId);
 
-      // Update the pending transaction
       final existingTransactions = state.transactions ?? <WalletTransaction>[];
       final updatedTransactions = existingTransactions.map((t) {
         if (t.id == transactionId) {
@@ -310,7 +345,6 @@ class WalletNotifier extends StateNotifier<WalletState> {
         return t;
       }).toList();
 
-      // If success, we might want to refresh the balance
       if (confirmation.status == 'SUCCESS') {
         final newBalance = await _walletRepository.getWalletBalance();
         state = state.copyWith(balance: newBalance);

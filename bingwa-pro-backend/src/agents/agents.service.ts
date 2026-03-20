@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Agent } from './entities/agent.entity';
+import { Agent, AgentStatus } from './entities/agent.entity'; // Add AgentStatus import
 import { Wallet } from '../wallets/entities/wallet.entity';
 
 @Injectable()
@@ -73,7 +73,8 @@ export class AgentsService {
     };
   }
 
-  async updateStatus(agentId: string, status: 'ACTIVE' | 'SUSPENDED'): Promise<Agent> {
+  // FIXED: Use AgentStatus enum
+  async updateStatus(agentId: string, status: AgentStatus): Promise<Agent> {
     const agent = await this.findById(agentId);
     
     agent.status = status;

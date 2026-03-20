@@ -1,3 +1,4 @@
+// lib/core/utils/logger.dart
 import 'package:logger/logger.dart';
 
 class AppLogger {
@@ -36,13 +37,19 @@ class AppLogger {
     _instance.f(message, error: error, stackTrace: stackTrace);
   }
   
+  // FIXED: Changed queryParameters type from Map<String, double> to Map<String, dynamic>
   static void logNetworkRequest({
     required String method,
     required String url,
     dynamic data,
     Map<String, dynamic>? headers,
+    Map<String, dynamic>? queryParameters, // FIXED: Changed from Map<String, double>
   }) {
     _instance.i('🌐 $method $url');
+    
+    if (queryParameters != null && queryParameters.isNotEmpty) {
+      _instance.d('Query Parameters: $queryParameters');
+    }
     
     if (data != null) {
       _instance.d('Request Data: $data');

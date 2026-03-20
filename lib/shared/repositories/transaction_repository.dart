@@ -1,9 +1,12 @@
+// lib/shared/repositories/transaction_repository.dart
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/network/dio_client.dart';
 import '../../core/constants/api_constants.dart';
 import '../../core/utils/logger.dart';
 import '../models/transaction_model.dart';
+// FIX: Use 'as' prefix to avoid ambiguity
+import '../models/product_model.dart' as product; // Import with alias
 
 class TransactionRepository {
   final Dio _dio;
@@ -161,15 +164,18 @@ class TransactionRepository {
   // Get Transaction History
   Future<TransactionListResponse> getTransactionHistory(TransactionFilter filter) async {
     try {
+      final queryParams = filter.toJson();
+      
       AppLogger.logNetworkRequest(
         method: 'GET',
         url: ApiConstants.transactionHistory,
+        queryParameters: queryParams,
         data: filter.toJson(),
       );
       
       final response = await _dio.get(
         ApiConstants.transactionHistory,
-        queryParameters: filter.toJson(),
+        queryParameters: queryParams,
       );
       
       AppLogger.logNetworkResponse(
@@ -188,7 +194,7 @@ class TransactionRepository {
     }
   }
   
-  // Retry Transaction - FIXED: Implements retry logic
+  // Retry Transaction
   Future<TransactionResponse> retryTransaction(RetryRequest request) async {
     try {
       final url = ApiConstants.retryTransaction.replaceFirst('{id}', request.transactionId);
@@ -257,7 +263,7 @@ class TransactionRepository {
   }
   
   // Get USSD Codes
-  Future<List<ProductBundle>> getUssdCodes() async {
+  Future<List<product.ProductBundle>> getUssdCodes() async {
     try {
       AppLogger.logNetworkRequest(
         method: 'GET',
@@ -273,7 +279,7 @@ class TransactionRepository {
       );
       
       final bundles = (response.data['bundles'] as List)
-          .map((json) => ProductBundle.fromJson(json))
+          .map((json) => product.ProductBundle.fromJson(json)) // FIX: Use product alias
           .toList();
       
       return bundles;
@@ -287,7 +293,7 @@ class TransactionRepository {
   }
   
   // Get Safaricom Bundles
-  Future<List<ProductBundle>> getSafaricomBundles() async {
+  Future<List<product.ProductBundle>> getSafaricomBundles() async {
     try {
       AppLogger.logNetworkRequest(
         method: 'GET',
@@ -303,7 +309,7 @@ class TransactionRepository {
       );
       
       final bundles = (response.data['bundles'] as List)
-          .map((json) => ProductBundle.fromJson(json))
+          .map((json) => product.ProductBundle.fromJson(json)) // FIX: Use product alias
           .toList();
       
       return bundles;
@@ -317,7 +323,7 @@ class TransactionRepository {
   }
   
   // Get Products
-  Future<List<ProductBundle>> getProducts({
+  Future<List<product.ProductBundle>> getProducts({
     TransactionType? type,
     String? network,
     bool? activeOnly,
@@ -331,6 +337,7 @@ class TransactionRepository {
       AppLogger.logNetworkRequest(
         method: 'GET',
         url: ApiConstants.products,
+        queryParameters: params,
         data: params,
       );
       
@@ -346,7 +353,7 @@ class TransactionRepository {
       );
       
       final bundles = (response.data['products'] as List)
-          .map((json) => ProductBundle.fromJson(json))
+          .map((json) => product.ProductBundle.fromJson(json)) // FIX: Use product alias
           .toList();
       
       return bundles;
@@ -454,6 +461,41 @@ class TransactionRepository {
     } catch (e) {
       AppLogger.e('Report transaction issue error:', e);
       rethrow;
+    }
+  }
+  
+  // Find Product By Price
+  Future<product.ProductBundle?> findProductByPrice(double amount) async {
+    try {
+      AppLogger.logNetworkRequest(
+        method: 'GET',
+        url: '/products/find-by-price',
+        queryParameters: {'amount': amount},
+      );
+      
+      final response = await _dio.get(
+        '/products/find-by-price',
+        queryParameters: {'amount': amount},
+      );
+      
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: '/products/find-by-price',
+        data: response.data,
+      );
+      
+      if (response.data == null) return null;
+      
+      return product.ProductBundle.fromJson(response.data); // FIX: Use product alias
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        return null;
+      }
+      AppLogger.e('Failed to find product by price:', e);
+      return null;
+    } catch (e) {
+      AppLogger.e('Failed to find product by price:', e);
+      return null;
     }
   }
 }

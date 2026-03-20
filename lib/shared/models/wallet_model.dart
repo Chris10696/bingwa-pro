@@ -1,3 +1,4 @@
+// lib/shared/models/wallet_model.dart
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'wallet_model.freezed.dart';
@@ -51,15 +52,15 @@ abstract class WalletTransaction with _$WalletTransaction {
     required DateTime timestamp,
     required String reference,
     String? description,
-    String? paymentMethod, // MPESA_TILL, MPESA_PAYBILL, AIRTIME, BANK_TRANSFER
+    String? paymentMethod,
     String? paymentReference,
     String? transactionId,
     String? reversedTransactionId,
-    String? initiatedBy, // AGENT, ADMIN, SYSTEM
+    String? initiatedBy,
     String? approvedBy,
     DateTime? approvedAt,
-    String? recipientAgentId, // For transfers
-    String? recipientPhone, // For withdrawals
+    String? recipientAgentId,
+    String? recipientPhone,
     Map<String, dynamic>? metadata,
   }) = _WalletTransaction;
 
@@ -67,7 +68,7 @@ abstract class WalletTransaction with _$WalletTransaction {
       _$WalletTransactionFromJson(json);
 }
 
-// Wallet Balance
+// Wallet Balance - UPDATED with token fields
 @freezed
 abstract class WalletBalance with _$WalletBalance {
   const factory WalletBalance({
@@ -81,6 +82,13 @@ abstract class WalletBalance with _$WalletBalance {
     @Default(0.0) double totalWithdrawals,
     @Default(0.0) double totalCommission,
     @Default(0.0) double totalBonuses,
+    
+    // ===== TOKEN FIELDS - ADD THESE =====
+    @Default(0) int tokenBalanceInt,
+    @Default(0) int lifetimeTokens,
+    @Default(0) int tokensConsumed,
+    // ====================================
+    
   }) = _WalletBalance;
 
   factory WalletBalance.fromJson(Map<String, dynamic> json) =>
@@ -93,11 +101,11 @@ abstract class TokenPurchaseRequest with _$TokenPurchaseRequest {
   const factory TokenPurchaseRequest({
     required String agentId,
     required double amount,
-    required String paymentMethod, // MPESA_TILL, MPESA_PAYBILL, AIRTIME
+    required String paymentMethod,
     String? tillNumber,
     String? paybillNumber,
     String? accountNumber,
-    String? phoneNumber, // For airtime payments
+    String? phoneNumber,
     required String deviceId,
   }) = _TokenPurchaseRequest;
 
@@ -128,7 +136,7 @@ abstract class WithdrawalRequest with _$WithdrawalRequest {
     required String agentId,
     required double amount,
     required String phoneNumber,
-    required String paymentMethod, // MPESA_TILL, MPESA_PAYBILL
+    required String paymentMethod,
     required String deviceId,
     String? tillNumber,
     String? paybillNumber,
@@ -163,7 +171,7 @@ abstract class PaymentConfirmation with _$PaymentConfirmation {
   const factory PaymentConfirmation({
     required String transactionId,
     required String reference,
-    required String status, // SUCCESS, FAILED, PENDING
+    required String status,
     required DateTime timestamp,
     String? mpesaReceipt,
     String? resultCode,
@@ -216,7 +224,7 @@ abstract class PaymentMethod with _$PaymentMethod {
   const factory PaymentMethod({
     required String id,
     required String name,
-    required String type, // MPESA_TILL, MPESA_PAYBILL, AIRTIME
+    required String type,
     required String displayName,
     required String description,
     @Default(true) bool isActive,

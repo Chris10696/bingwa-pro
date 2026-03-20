@@ -1,7 +1,9 @@
+// lib/features/transactions/presentation/providers/transaction_provider.dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:bingwa_pro/shared/models/transaction_model.dart';
 import 'package:bingwa_pro/shared/repositories/transaction_repository.dart';
+import 'package:bingwa_pro/core/utils/logger.dart'; // FIX: Correct AppLogger import
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../../core/security/device_fingerprint.dart';
 
@@ -160,7 +162,7 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
     }
   }
 
-  // FIXED: Implement retry logic (Line 129)
+  // Retry transaction
   Future<TransactionResponse?> retryTransaction(String transactionId) async {
     state = state.copyWith(isRetrying: true, retryError: null, retrySuccessMessage: null);
 
@@ -226,6 +228,66 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
       return null;
     }
   }
+
+  // ===== NEW METHOD: Record Transaction (MOVED INSIDE CLASS) =====
+  Future<TransactionDetails> recordTransaction({
+    required String customerPhone,
+    required double amount,
+    required String productId,
+    required String reference,
+  }) async {
+    try {
+      // Get agent ID from auth state
+      final authState = _ref.read(authNotifierProvider);
+      final agentId = authState.agent?.id ?? '';
+      
+      if (agentId.isEmpty) {
+        throw Exception('Agent ID not found. Please login again.');
+      }
+
+      // Create transaction details
+      final transaction = TransactionDetails(
+        id: 'txn_${DateTime.now().millisecondsSinceEpoch}',
+        agentId: agentId,
+        customerPhone: customerPhone,
+        amount: amount,
+        type: TransactionType.data, // This should come from product
+        status: TransactionStatus.success,
+        productId: productId,
+        productName: 'Data Bundle', // This should come from product
+        reference: reference,
+        safaricomReference: reference,
+        tokenAmount: 1,
+        commission: amount * 0.05,
+        balanceAfter: 0,
+        createdAt: DateTime.now(),
+        completedAt: DateTime.now(),
+      );
+
+      // Convert to Transaction and update state
+      final newTransaction = transaction.toTransaction();
+      final updatedTransactions = [newTransaction, ...state.transactions];
+      
+      state = state.copyWith(
+        transactions: updatedTransactions.take(50).toList(),
+      );
+
+      // Log the transaction
+      AppLogger.logTransaction(
+        type: 'Record',
+        phone: customerPhone,
+        amount: amount,
+        status: 'SUCCESS',
+        reference: reference,
+      );
+
+      return transaction;
+    } catch (e) {
+      AppLogger.e('Failed to record transaction:', e);
+      rethrow;
+    }
+  }
+  // ===============================================================
 
   // Clear retry messages
   void clearRetryMessages() {
@@ -300,6 +362,7 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
   }
 }
 
+// Provider
 final transactionProvider = StateNotifierProvider<TransactionNotifier, TransactionState>((ref) {
   final repository = ref.read(transactionRepositoryProvider);
   return TransactionNotifier(repository, ref);

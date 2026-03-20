@@ -17,6 +17,7 @@ class WalletScreen extends ConsumerStatefulWidget {
 
 class _WalletScreenState extends ConsumerState<WalletScreen> {
   final _scrollController = ScrollController();
+  bool _showTokenPackages = false;
 
   @override
   void initState() {
@@ -89,8 +90,16 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   _buildBalanceCard(state),
                   const SizedBox(height: 20),
 
+                  // Token Stats Card
+                  _buildTokenStatsCard(state),
+                  const SizedBox(height: 20),
+
                   // Quick Actions
                   _buildQuickActions(state),
+                  const SizedBox(height: 20),
+
+                  // Token Packages Section (collapsible)
+                  _buildTokenPackagesSection(state),
                   const SizedBox(height: 20),
 
                   // Transactions Header
@@ -124,12 +133,13 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 ],
               ),
             ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           context.push('/wallet/topup');
         },
         backgroundColor: const Color(0xFF00C853),
-        child: const Icon(Icons.add, color: Colors.white),
+        icon: const Icon(Icons.add, color: Colors.white),
+        label: const Text('Buy Tokens', style: TextStyle(color: Colors.white)),
       ),
     );
   }
@@ -222,6 +232,271 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTokenStatsCard(WalletState state) {
+    // Safe access to token fields with null checks
+    final tokenBalance = state.balance?.tokenBalanceInt ?? 0;
+    final lifetimeTokens = state.balance?.lifetimeTokens ?? 0;
+    final tokensConsumed = state.balance?.tokensConsumed ?? 0;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.1),
+            blurRadius: 5,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Token Balance',
+                    style: TextStyle(fontSize: 14, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$tokenBalance',
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF00C853),
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00C853).withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.token,
+                  color: Color(0xFF00C853),
+                  size: 30,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  children: [
+                    Text(
+                      '$lifetimeTokens',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Text(
+                      'Lifetime',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    Text(
+                      '$tokensConsumed',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Text(
+                      'Consumed',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    Text(
+                      '${((tokensConsumed / (lifetimeTokens == 0 ? 1 : lifetimeTokens)) * 100).toStringAsFixed(1)}%',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Text(
+                      'Usage Rate',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(
+            value: lifetimeTokens == 0 ? 0 : tokensConsumed / lifetimeTokens,
+            backgroundColor: Colors.grey.shade200,
+            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF00C853)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTokenPackagesSection(WalletState state) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Token Packages',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                icon: Icon(
+                  _showTokenPackages ? Icons.expand_less : Icons.expand_more,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _showTokenPackages = !_showTokenPackages;
+                  });
+                },
+              ),
+            ],
+          ),
+        ),
+        if (_showTokenPackages)
+          SizedBox(
+            height: 220,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: 4, // Mock data - replace with actual token packages
+              itemBuilder: (context, index) {
+                return _buildTokenPackageCard(index);
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildTokenPackageCard(int index) {
+    // Mock data - replace with actual data from provider
+    final packages = [
+      {'name': 'Daily Trial', 'tokens': 50, 'price': 20, 'color': Colors.blue},
+      {'name': 'Weekly Starter', 'tokens': 500, 'price': 150, 'color': Colors.purple},
+      {'name': 'Monthly Business', 'tokens': 2500, 'price': 500, 'color': Colors.orange},
+      {'name': 'Bulk Trader', 'tokens': 10000, 'price': 1500, 'color': Colors.red},
+    ];
+
+    final package = packages[index];
+
+    return Container(
+      width: 160,
+      margin: const EdgeInsets.only(right: 12),
+      child: Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: (package['color'] as Color).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.token,
+                  color: package['color'] as Color,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                package['name'] as String,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${package['tokens']} tokens',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+              const Spacer(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'KES ${package['price']}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF00C853),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () {
+                      // Navigate to topup with selected package
+                      context.push('/wallet/topup');
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00C853),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'Buy',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -341,22 +616,21 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   controller: amountController,
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
-                    labelText: 'Amount',
-                    hintText: 'Enter amount',
-                    prefixText: 'KES ',
+                    labelText: 'Amount (Tokens)',
+                    hintText: 'Enter token amount',
                     border: const OutlineInputBorder(),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Please enter amount';
                     }
-                    final amount = double.tryParse(value);
+                    final amount = int.tryParse(value);
                     if (amount == null || amount <= 0) {
                       return 'Please enter a valid amount';
                     }
-                    if (state.balance?.availableBalance != null && 
-                        amount > state.balance!.availableBalance) {
-                      return 'Insufficient balance';
+                    if (state.balance?.tokenBalanceInt != null && 
+                        amount > state.balance!.tokenBalanceInt) {
+                      return 'Insufficient tokens';
                     }
                     return null;
                   },
@@ -385,10 +659,10 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               
               Navigator.pop(dialogContext);
               
-              final amount = double.parse(amountController.text);
+              final amount = int.parse(amountController.text);
               await ref.read(walletNotifierProvider.notifier).transferTokens(
                 toAgentId: agentIdController.text,
-                amount: amount,
+                amount: amount.toDouble(),
                 description: descriptionController.text.isNotEmpty 
                     ? descriptionController.text 
                     : 'Token transfer',
@@ -468,22 +742,21 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                       controller: amountController,
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        labelText: 'Amount',
-                        hintText: 'Enter amount',
-                        prefixText: 'KES ',
+                        labelText: 'Amount (Tokens)',
+                        hintText: 'Enter token amount',
                         border: const OutlineInputBorder(),
                       ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Please enter amount';
                         }
-                        final amount = double.tryParse(value);
+                        final amount = int.tryParse(value);
                         if (amount == null || amount <= 0) {
                           return 'Please enter a valid amount';
                         }
-                        if (state.balance?.availableBalance != null && 
-                            amount > state.balance!.availableBalance) {
-                          return 'Insufficient balance';
+                        if (state.balance?.tokenBalanceInt != null && 
+                            amount > state.balance!.tokenBalanceInt) {
+                          return 'Insufficient tokens';
                         }
                         return null;
                       },
@@ -503,9 +776,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                   
                   Navigator.pop(dialogContext);
                   
-                  final amount = double.parse(amountController.text);
+                  final amount = int.parse(amountController.text);
                   await ref.read(walletNotifierProvider.notifier).withdrawTokens(
-                    amount: amount,
+                    amount: amount.toDouble(),
                     phoneNumber: phoneController.text,
                     paymentMethod: selectedMethod,
                     description: 'Token withdrawal',
@@ -625,7 +898,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              Formatters.formatCurrency(transaction.amount),
+              '${transaction.amount > 0 ? '+' : ''}${transaction.amount} tokens',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: color,
@@ -645,6 +918,4 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       ),
     );
   }
-
-  // Removed duplicate dispose method
 }

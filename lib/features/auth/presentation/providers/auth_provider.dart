@@ -1,16 +1,18 @@
+// lib/features/auth/presentation/providers/auth_provider.dart
 import 'package:bingwa_pro/core/utils/logger.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:formz/formz.dart' show FormzInput, FormzSubmissionStatus, FormzSubmissionStatusX;
-import '/../../shared/models/auth_model.dart';
-import '/../../shared/repositories/auth_repository.dart';
-import '/../../core/utils/validators.dart';
-import '/../../core/security/secure_storage_manager.dart';
-import '/../../core/security/device_fingerprint.dart';
+import '../../../../shared/models/auth_model.dart';
+import '../../../../shared/repositories/auth_repository.dart';
+import '../../../../shared/repositories/wallet_repository.dart'; // ADD THIS IMPORT
+import '../../../../core/utils/validators.dart';
+import '../../../../core/security/secure_storage_manager.dart';
+import '../../../../core/security/device_fingerprint.dart';
 
 // Form Models
 class PhoneNumber extends FormzInput<String, String> {
   const PhoneNumber.pure() : super.pure('');
-  const PhoneNumber.dirty([String value = '']) : super.dirty(value);
+  const PhoneNumber.dirty([super.value = '']) : super.dirty(); // FIX: super parameter
   
   @override
   String? validator(String? value) {
@@ -20,7 +22,7 @@ class PhoneNumber extends FormzInput<String, String> {
 
 class Pin extends FormzInput<String, String> {
   const Pin.pure() : super.pure('');
-  const Pin.dirty([String value = '']) : super.dirty(value);
+  const Pin.dirty([super.value = '']) : super.dirty(); // FIX: super parameter
   
   @override
   String? validator(String? value) {
@@ -30,7 +32,7 @@ class Pin extends FormzInput<String, String> {
 
 class FullName extends FormzInput<String, String> {
   const FullName.pure() : super.pure('');
-  const FullName.dirty([String value = '']) : super.dirty(value);
+  const FullName.dirty([super.value = '']) : super.dirty(); // FIX: super parameter
   
   @override
   String? validator(String? value) {
@@ -40,7 +42,7 @@ class FullName extends FormzInput<String, String> {
 
 class Email extends FormzInput<String, String> {
   const Email.pure() : super.pure('');
-  const Email.dirty([String value = '']) : super.dirty(value);
+  const Email.dirty([super.value = '']) : super.dirty(); // FIX: super parameter
   
   @override
   String? validator(String? value) {
@@ -50,7 +52,7 @@ class Email extends FormzInput<String, String> {
 
 class NationalId extends FormzInput<String, String> {
   const NationalId.pure() : super.pure('');
-  const NationalId.dirty([String value = '']) : super.dirty(value);
+  const NationalId.dirty([super.value = '']) : super.dirty(); // FIX: super parameter
   
   @override
   String? validator(String? value) {
@@ -148,8 +150,9 @@ class AuthState {
 // Auth Notifier
 class AuthNotifier extends StateNotifier<AuthState> {
   final AuthRepository _authRepository;
+  final Ref _ref; // ADD THIS for accessing other providers
   
-  AuthNotifier(this._authRepository) : super(AuthState());
+  AuthNotifier(this._authRepository, this._ref) : super(AuthState());
   
   // Login Methods
   void updatePhoneNumber(String value) {
@@ -167,87 +170,87 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
   
   Future<void> login() async {
-  if (state.status.isInProgress) return;
-  
-  if (!state.phoneNumber.isValid || !state.pin.isValid) {
-    state = state.copyWith(
-      errorMessage: 'Please fix validation errors',
-    );
-    return;
-  }
-  
-  state = state.copyWith(
-    status: FormzSubmissionStatus.inProgress,
-    isLoading: true,
-    errorMessage: null,
-  );
-  
-  try {
-    // Generate or get device ID
-    String deviceId = await SecureStorageManager.getDeviceId() ?? 
-        await DeviceFingerprint.generateDeviceId();
+    if (state.status.isInProgress) return;
     
-    final request = LoginRequest(
-      phoneNumber: state.phoneNumber.value,
-      pin: state.pin.value,
-      deviceId: deviceId,
-      platform: 'android',
-    );
-    
-    final response = await _authRepository.login(request);
-    
-    // Check agent status
-    if (response.agent.status != AgentAuthStatus.active) {
-      String statusMessage = 'Your account is ${response.agent.status.toString().split('.').last}. ';
-      if (response.agent.status == AgentAuthStatus.pending) {
-        statusMessage += 'Please wait for admin approval.';
-      } else if (response.agent.status == AgentAuthStatus.suspended) {
-        statusMessage += 'Please contact support.';
-      }
-      
+    if (!state.phoneNumber.isValid || !state.pin.isValid) {
       state = state.copyWith(
-        status: FormzSubmissionStatus.failure,
-        errorMessage: statusMessage,
-        isLoading: false,
-        isAuthenticated: false,
+        errorMessage: 'Please fix validation errors',
       );
       return;
     }
     
-    // Save device ID if not already saved
-    if (await SecureStorageManager.getDeviceId() == null) {
-      await SecureStorageManager.saveDeviceId(deviceId);
-    }
-    
-    // Save session data
-    await SecureStorageManager.saveAuthToken(response.accessToken);
-    await SecureStorageManager.saveRefreshToken(response.refreshToken);
-    await SecureStorageManager.saveSessionExpiry(response.expiresAt);
-    await SecureStorageManager.saveAgentId(response.agent.id);
-    
     state = state.copyWith(
-      status: FormzSubmissionStatus.success,
-      agent: response.agent,
-      isAuthenticated: true,
-      isLoading: false,
-      requiresBiometricSetup: response.requiresBiometricSetup,
+      status: FormzSubmissionStatus.inProgress,
+      isLoading: true,
       errorMessage: null,
     );
-  } catch (e) {
-    String errorMsg = e.toString();
-    // Clean up error message
-    if (errorMsg.startsWith('Exception:')) {
-      errorMsg = errorMsg.substring(10);
-    }
     
-    state = state.copyWith(
-      status: FormzSubmissionStatus.failure,
-      errorMessage: errorMsg.trim(),
-      isLoading: false,
-      isAuthenticated: false,
-    );
+    try {
+      // Generate or get device ID
+      String deviceId = await SecureStorageManager.getDeviceId() ?? 
+          await DeviceFingerprint.generateDeviceId();
+      
+      final request = LoginRequest(
+        phoneNumber: state.phoneNumber.value,
+        pin: state.pin.value,
+        deviceId: deviceId,
+        platform: 'android',
+      );
+      
+      final response = await _authRepository.login(request);
+      
+      // Check agent status
+      if (response.agent.status != AgentAuthStatus.active) {
+        String statusMessage = 'Your account is ${response.agent.status.toString().split('.').last}. ';
+        if (response.agent.status == AgentAuthStatus.pending) {
+          statusMessage += 'Please wait for admin approval.';
+        } else if (response.agent.status == AgentAuthStatus.suspended) {
+          statusMessage += 'Please contact support.';
+        }
+        
+        state = state.copyWith(
+          status: FormzSubmissionStatus.failure,
+          errorMessage: statusMessage,
+          isLoading: false,
+          isAuthenticated: false,
+        );
+        return;
+      }
+      
+      // Save device ID if not already saved
+      if (await SecureStorageManager.getDeviceId() == null) {
+        await SecureStorageManager.saveDeviceId(deviceId);
+      }
+      
+      // Save session data
+      await SecureStorageManager.saveAuthToken(response.accessToken);
+      await SecureStorageManager.saveRefreshToken(response.refreshToken);
+      await SecureStorageManager.saveSessionExpiry(response.expiresAt);
+      await SecureStorageManager.saveAgentId(response.agent.id);
+      
+      state = state.copyWith(
+        status: FormzSubmissionStatus.success,
+        agent: response.agent,
+        isAuthenticated: true,
+        isLoading: false,
+        requiresBiometricSetup: response.requiresBiometricSetup,
+        errorMessage: null,
+      );
+    } catch (e) {
+      String errorMsg = e.toString();
+      // Clean up error message
+      if (errorMsg.startsWith('Exception:')) {
+        errorMsg = errorMsg.substring(10);
+      }
+      
+      state = state.copyWith(
+        status: FormzSubmissionStatus.failure,
+        errorMessage: errorMsg.trim(),
+        isLoading: false,
+        isAuthenticated: false,
+      );
+    }
   }
-}
   
   // Registration Methods
   void updateFullName(String value) {
@@ -422,29 +425,29 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
   
   // Session Management
- Future<void> logout() async {
-  state = state.copyWith(isLoading: true);
-  
-  try {
-    // Call API logout endpoint
-    await _authRepository.logout();
+  Future<void> logout() async {
+    state = state.copyWith(isLoading: true);
     
-    // Clear all local storage
-    await SecureStorageManager.clearAll();
-    
-    // Reset state
-    state = AuthState();
-    
-    AppLogger.logSessionEvent(event: 'Logout successful');
-  } catch (e) {
-    AppLogger.e('Logout error:', e);
-    // Even if API fails, clear local state
-    await SecureStorageManager.clearAll();
-    state = AuthState();
-  } finally {
-    state = state.copyWith(isLoading: false);
+    try {
+      // Call API logout endpoint
+      await _authRepository.logout();
+      
+      // Clear all local storage
+      await SecureStorageManager.clearAll();
+      
+      // Reset state
+      state = AuthState();
+      
+      AppLogger.logSessionEvent(event: 'Logout successful');
+    } catch (e) {
+      AppLogger.e('Logout error:', e);
+      // Even if API fails, clear local state
+      await SecureStorageManager.clearAll();
+      state = AuthState();
+    } finally {
+      state = state.copyWith(isLoading: false);
+    }
   }
-}
   
   Future<void> checkAuthentication() async {
     state = state.copyWith(isLoading: true);
@@ -534,6 +537,69 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
   
+  // ===== NEW METHOD: Update Payment Settings (MOVED INSIDE CLASS) =====
+  Future<void> updatePaymentSettings({
+    required String? tillNumber,
+    required String? paybillNumber,
+    required String? paybillAccount,
+    required String method,
+    required bool autoDetect,
+  }) async {
+    if (state.status.isInProgress) return;
+    
+    state = state.copyWith(
+      status: FormzSubmissionStatus.inProgress,
+      isLoading: true,
+      errorMessage: null,
+    );
+    
+    try {
+      final agent = state.agent;
+      if (agent == null) throw Exception('Not authenticated');
+      
+      // Call repository
+      final walletRepo = _ref.read(walletRepositoryProvider);
+      await walletRepo.updatePaymentSettings(
+        agentId: agent.id,
+        tillNumber: tillNumber,
+        paybillNumber: paybillNumber,
+        paybillAccount: paybillAccount,
+        method: method,
+        autoDetect: autoDetect,
+      );
+      
+      // Update local agent state
+      final updatedAgent = agent.copyWith(
+        tillNumber: tillNumber,
+        paybillNumber: paybillNumber,
+        paybillAccount: paybillAccount,
+        defaultPaymentMethod: method,
+        paymentSettings: {'autoDetect': autoDetect},
+        tillNumberStatus: 'pending',
+      );
+      
+      state = state.copyWith(
+        status: FormzSubmissionStatus.success,
+        agent: updatedAgent,
+        isLoading: false,
+      );
+      
+      AppLogger.logSessionEvent(
+        event: 'Payment settings updated',
+        details: 'Method: $method',
+      );
+      
+    } catch (e) {
+      AppLogger.e('Failed to update payment settings:', e);
+      state = state.copyWith(
+        status: FormzSubmissionStatus.failure,
+        errorMessage: e.toString().replaceFirst('Exception:', '').trim(),
+        isLoading: false,
+      );
+    }
+  }
+  // ===================================================================
+  
   // Clear Errors
   void clearError() {
     state = state.copyWith(errorMessage: null);
@@ -551,7 +617,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 // Providers
 final authNotifierProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   final authRepository = ref.watch(authRepositoryProvider);
-  return AuthNotifier(authRepository);
+  return AuthNotifier(authRepository, ref); // Pass ref to constructor
 });
 
 final isAuthenticatedProvider = Provider<bool>((ref) {
