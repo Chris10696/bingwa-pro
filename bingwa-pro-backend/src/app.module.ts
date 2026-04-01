@@ -9,9 +9,14 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { ProductsModule } from './products/products.module';
 import { UssdModule } from './ussd/ussd.module';
 import { MpesaModule } from './mpesa/mpesa.module'; // Add this
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
   imports: [
+    HttpModule.register({
+      timeout: 30000,
+      maxRedirects: 5,
+    }),
     ThrottlerModule.forRoot([{
       ttl: 60000,
       limit: 100,

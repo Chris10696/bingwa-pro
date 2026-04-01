@@ -1,3 +1,4 @@
+// bingwa-pro-backend/src/wallets/wallets.module.ts
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -15,6 +16,6 @@ import { Agent } from '../agents/entities/agent.entity';
   ],
   controllers: [WalletsController],
   providers: [WalletsService],
-  exports: [WalletsService],
+  exports: [WalletsService],  // ✅ Already exported
 })
 export class WalletsModule {}

@@ -1,5 +1,7 @@
+// bingwa-pro-backend/src/ussd/entities/ussd-session.entity.ts
 import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { UssdRoute } from './ussd-route.entity';
+import { Agent } from '../../agents/entities/agent.entity';
 
 export enum UssdSessionStatus {
   INITIATED = 'initiated',
@@ -20,6 +22,12 @@ export class UssdSession {
 
   @Column({ nullable: true })
   agentId: string; // Agent performing the transaction
+
+  // ===== ADD AGENT RELATION (Fixes the 'agent' property error) =====
+  @ManyToOne(() => Agent)
+  @JoinColumn({ name: 'agentId' })
+  agent: Agent;
+  // =================================================================
 
   @Column({ nullable: true })
   transactionId: string; // Related transaction
@@ -48,6 +56,11 @@ export class UssdSession {
 
   @Column('simple-json', { nullable: true })
   extractedData: Record<string, any>; // Data extracted from responses
+
+  // ===== ADD METADATA FIELD (Fixes the 'metadata' property error) =====
+  @Column('jsonb', { nullable: true })
+  metadata: Record<string, any>; // For storing session-specific data (menu level, action, customerPhone, etc.)
+  // ====================================================================
 
   @Column({
     type: 'enum',

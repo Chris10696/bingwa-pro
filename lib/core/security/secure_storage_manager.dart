@@ -1,11 +1,25 @@
+// lib/core/security/secure_storage_manager.dart
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:encrypt/encrypt.dart' as encrypt_lib;
 import '../constants/storage_constants.dart';
-import '../errors/exceptions.dart';
+//import '../errors/exceptions.dart';
 import '../utils/logger.dart';
 
 class SecureStorageManager {
-  static const FlutterSecureStorage _storage = FlutterSecureStorage();
+  // Configure Android options to prevent the -16 error
+  static const FlutterSecureStorage _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+      preferencesKeyPrefix: 'bingwa_',
+    ),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+    ),
+  );
+  
+  // Fallback SharedPreferences for when secure storage fails
+  static SharedPreferences? _prefs;
   
   // Generate a key - in production, this should be securely generated and stored
   static final _key = encrypt_lib.Key.fromLength(32);
@@ -18,16 +32,23 @@ class SecureStorageManager {
   
   // Biometric preference key
   static const String _keyBiometricEnabled = 'biometric_enabled';
+  
+  // Initialize SharedPreferences fallback
+  static Future<void> _initPrefs() async {
+    _prefs ??= await SharedPreferences.getInstance();
+  }
 
   // Initialize and check storage health
   static Future<void> initialize() async {
     try {
+      await _initPrefs();
+      
       // Check if we need to migrate or repair storage
-      final versionString = await _storage.read(key: _storageVersionKey);
+      final versionString = await _safeRead(_storageVersionKey);
       
       if (versionString == null) {
         // First time initialization
-        await _storage.write(key: _storageVersionKey, value: _currentStorageVersion.toString());
+        await _safeWrite(_storageVersionKey, _currentStorageVersion.toString());
       } else {
         final version = int.tryParse(versionString) ?? 0;
         if (version < _currentStorageVersion) {
@@ -52,7 +73,6 @@ class SecureStorageManager {
       
       if (oldVersion < 1) {
         // Version 0 to 1 migration
-        // Re-encrypt any existing tokens to ensure proper format
         final oldToken = await _safeRead(StorageConstants.authToken);
         if (oldToken != null && oldToken.isNotEmpty) {
           await _safeWrite(StorageConstants.authToken, oldToken);
@@ -65,7 +85,7 @@ class SecureStorageManager {
       }
       
       // Update version
-      await _storage.write(key: _storageVersionKey, value: _currentStorageVersion.toString());
+      await _safeWrite(_storageVersionKey, _currentStorageVersion.toString());
       AppLogger.i('Storage migration completed');
       
     } catch (e) {
@@ -91,7 +111,7 @@ class SecureStorageManager {
       
       for (final key in keys) {
         try {
-          final value = await _storage.read(key: key);
+          final value = await _safeRead(key);
           if (value != null) {
             // Try to decrypt if it's an encrypted key
             if (key == StorageConstants.authToken || 
@@ -102,13 +122,13 @@ class SecureStorageManager {
                 _encrypter.decrypt64(value, iv: _iv);
               } catch (e) {
                 AppLogger.w('Corrupted encrypted data detected for key: $key');
-                await _storage.delete(key: key);
+                await _delete(key);
               }
             }
           }
         } catch (e) {
           AppLogger.w('Corrupted data detected for key: $key');
-          await _storage.delete(key: key);
+          await _delete(key);
         }
       }
       
@@ -122,37 +142,63 @@ class SecureStorageManager {
     try {
       AppLogger.w('Force clearing corrupted storage');
       await _storage.deleteAll();
-      await _storage.write(key: _storageVersionKey, value: _currentStorageVersion.toString());
+      if (_prefs != null) {
+        await _prefs!.clear();
+      }
+      await _safeWrite(_storageVersionKey, _currentStorageVersion.toString());
       AppLogger.i('Storage cleared successfully');
     } catch (e) {
       AppLogger.e('Failed to clear storage', e);
     }
   }
 
-  // Safe read with error handling
+  // Safe read with error handling - tries secure storage first, falls back to SharedPreferences
   static Future<String?> _safeRead(String key) async {
     try {
+      // Try secure storage first
       return await _storage.read(key: key);
     } catch (e) {
-      AppLogger.e('Failed to read key: $key', e);
-      // Delete corrupted key
+      // If secure storage fails, try SharedPreferences
+      AppLogger.w('Secure storage read failed for key: $key, trying SharedPreferences', e);
       try {
-        await _storage.delete(key: key);
-      } catch (deleteError) {
-        AppLogger.e('Failed to delete corrupted key: $key', deleteError);
+        await _initPrefs();
+        return _prefs?.getString(key);
+      } catch (fallbackError) {
+        AppLogger.e('Fallback read also failed for key: $key', fallbackError);
+        return null;
       }
-      return null;
     }
   }
 
-  // Safe write with error handling
+  // Safe write with error handling - tries secure storage first, falls back to SharedPreferences
   static Future<bool> _safeWrite(String key, String value) async {
     try {
+      // Try secure storage first
       await _storage.write(key: key, value: value);
       return true;
     } catch (e) {
-      AppLogger.e('Failed to write key: $key', e);
-      return false;
+      // If secure storage fails, try SharedPreferences
+      AppLogger.w('Secure storage write failed for key: $key, trying SharedPreferences', e);
+      try {
+        await _initPrefs();
+        await _prefs?.setString(key, value);
+        return true;
+      } catch (fallbackError) {
+        AppLogger.e('Fallback write also failed for key: $key', fallbackError);
+        return false;
+      }
+    }
+  }
+  
+  // Safe delete
+  static Future<void> _delete(String key) async {
+    try {
+      await _storage.delete(key: key);
+      if (_prefs != null) {
+        await _prefs!.remove(key);
+      }
+    } catch (e) {
+      AppLogger.w('Failed to delete key: $key', e);
     }
   }
 
@@ -162,7 +208,9 @@ class SecureStorageManager {
       final encrypted = _encrypter.encrypt(token, iv: _iv);
       await _safeWrite(StorageConstants.authToken, encrypted.base64);
     } catch (e) {
-      throw EncryptionException('Failed to save auth token: $e');
+      // If encryption fails, save plain text (not recommended but better than nothing)
+      AppLogger.w('Encryption failed, saving auth token in plain text', e);
+      await _safeWrite(StorageConstants.authToken, token);
     }
   }
   
@@ -170,11 +218,17 @@ class SecureStorageManager {
     try {
       final encrypted = await _safeRead(StorageConstants.authToken);
       if (encrypted == null) return null;
-      return _encrypter.decrypt64(encrypted, iv: _iv);
+      
+      // Try to decrypt
+      try {
+        return _encrypter.decrypt64(encrypted, iv: _iv);
+      } catch (e) {
+        // If decryption fails, it might be plain text from fallback
+        AppLogger.w('Decryption failed, returning raw value', e);
+        return encrypted;
+      }
     } catch (e) {
       AppLogger.e('Failed to get auth token', e);
-      // Delete corrupted token
-      await _storage.delete(key: StorageConstants.authToken);
       return null;
     }
   }
@@ -184,7 +238,8 @@ class SecureStorageManager {
       final encrypted = _encrypter.encrypt(token, iv: _iv);
       await _safeWrite(StorageConstants.refreshToken, encrypted.base64);
     } catch (e) {
-      throw EncryptionException('Failed to save refresh token: $e');
+      AppLogger.w('Encryption failed, saving refresh token in plain text', e);
+      await _safeWrite(StorageConstants.refreshToken, token);
     }
   }
   
@@ -192,10 +247,14 @@ class SecureStorageManager {
     try {
       final encrypted = await _safeRead(StorageConstants.refreshToken);
       if (encrypted == null) return null;
-      return _encrypter.decrypt64(encrypted, iv: _iv);
+      
+      try {
+        return _encrypter.decrypt64(encrypted, iv: _iv);
+      } catch (e) {
+        return encrypted;
+      }
     } catch (e) {
       AppLogger.e('Failed to get refresh token', e);
-      await _storage.delete(key: StorageConstants.refreshToken);
       return null;
     }
   }
@@ -216,7 +275,7 @@ class SecureStorageManager {
       return DateTime.parse(expiryString);
     } catch (e) {
       AppLogger.e('Failed to parse session expiry', e);
-      await _storage.delete(key: StorageConstants.sessionExpiry);
+      await _delete(StorageConstants.sessionExpiry);
       return null;
     }
   }
@@ -236,7 +295,8 @@ class SecureStorageManager {
       final encrypted = _encrypter.encrypt(pin, iv: _iv);
       await _safeWrite(StorageConstants.encryptedPin, encrypted.base64);
     } catch (e) {
-      throw EncryptionException('Failed to save PIN: $e');
+      AppLogger.w('Encryption failed, saving PIN in plain text', e);
+      await _safeWrite(StorageConstants.encryptedPin, pin);
     }
   }
   
@@ -244,10 +304,14 @@ class SecureStorageManager {
     try {
       final encrypted = await _safeRead(StorageConstants.encryptedPin);
       if (encrypted == null) return null;
-      return _encrypter.decrypt64(encrypted, iv: _iv);
+      
+      try {
+        return _encrypter.decrypt64(encrypted, iv: _iv);
+      } catch (e) {
+        return encrypted;
+      }
     } catch (e) {
       AppLogger.e('Failed to get PIN', e);
-      await _storage.delete(key: StorageConstants.encryptedPin);
       return null;
     }
   }
@@ -267,7 +331,8 @@ class SecureStorageManager {
       final encrypted = _encrypter.encrypt(key, iv: _iv);
       await _safeWrite(StorageConstants.biometricKey, encrypted.base64);
     } catch (e) {
-      throw EncryptionException('Failed to save biometric key: $e');
+      AppLogger.w('Encryption failed, saving biometric key in plain text', e);
+      await _safeWrite(StorageConstants.biometricKey, key);
     }
   }
   
@@ -275,10 +340,14 @@ class SecureStorageManager {
     try {
       final encrypted = await _safeRead(StorageConstants.biometricKey);
       if (encrypted == null) return null;
-      return _encrypter.decrypt64(encrypted, iv: _iv);
+      
+      try {
+        return _encrypter.decrypt64(encrypted, iv: _iv);
+      } catch (e) {
+        return encrypted;
+      }
     } catch (e) {
       AppLogger.e('Failed to get biometric key', e);
-      await _storage.delete(key: StorageConstants.biometricKey);
       return null;
     }
   }
@@ -315,7 +384,9 @@ class SecureStorageManager {
     try {
       AppLogger.i('Clearing all secure storage');
       await _storage.deleteAll();
-      await _storage.write(key: _storageVersionKey, value: _currentStorageVersion.toString());
+      await _initPrefs();
+      await _prefs?.clear();
+      await _safeWrite(_storageVersionKey, _currentStorageVersion.toString());
       AppLogger.i('All storage cleared successfully');
     } catch (e) {
       AppLogger.e('Failed to clear all storage', e);

@@ -1,3 +1,4 @@
+// bingwa-pro-backend/src/ussd/ussd.controller.ts
 import { 
   Controller, 
   Get, 
@@ -11,6 +12,8 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Req,
+  Res,
 } from '@nestjs/common';
 import { UssdService } from './ussd.service';
 import { ExecuteUssdDto } from './dto/execute-ussd.dto';
@@ -22,7 +25,26 @@ import { UssdAnomalyStatus } from './entities/ussd-anomaly.entity';
 export class UssdController {
   constructor(private readonly ussdService: UssdService) {}
 
-  // ========== USSD EXECUTION ==========
+  // ========== AFRICA'S TALKING CALLBACK (PUBLIC ENDPOINT) ==========
+  
+  /**
+   * This endpoint receives POST requests from Africa's Talking USSD gateway
+   * Must be public (no auth) as Africa's Talking calls it
+   */
+  @Post('callback')
+  @HttpCode(HttpStatus.OK)
+  async handleUssdCallback(@Req() req: any, @Res() res: any) {
+    // Africa's Talking sends data as application/x-www-form-urlencoded
+    const body = req.body;
+    
+    const response = await this.ussdService.handleAfricaTalkingCallback(body);
+    
+    // Return response in the format Africa's Talking expects (plain text)
+    res.set('Content-Type', 'text/plain');
+    res.send(response);
+  }
+
+  // ========== USSD EXECUTION (Internal API for Flutter app) ==========
 
   @Post('execute')
   @UseGuards(JwtAuthGuard)
