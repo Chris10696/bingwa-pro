@@ -1,70 +1,56 @@
 // lib/features/ussd/services/ussd_service.dart
-import 'package:bingwa_pro/core/security/secure_storage_manager.dart';
-import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/network/dio_client.dart';
+import '../../../core/security/secure_storage_manager.dart';
 import '../../../core/utils/logger.dart';
 
 class UssdService {
-  final Dio _dio;
+  static const MethodChannel _ussdChannel = MethodChannel('bingwa_pro/ussd');
+  static const MethodChannel _airtimeChannel = MethodChannel('bingwa_pro/airtime');
+  static const MethodChannel _serviceChannel = MethodChannel('bingwa_pro/service');
   
-  UssdService(this._dio);
+  // ===== USSD EXECUTION =====
   
-  // This now calls your backend API instead of direct Android USSD
+  // Express mode - single-step USSD
   Future<bool> executeUssd({
     required String ussdCode,
     required String phoneNumber,
   }) async {
     try {
-      AppLogger.d('Sending USSD request to backend: $ussdCode for $phoneNumber');
+      AppLogger.d('Executing EXPRESS USSD: $ussdCode for $phoneNumber');
       
-      final response = await _dio.post('/ussd/execute', data: {
-        'action': 'INITIATE',
-        'routeCode': ussdCode,
-        'agentPhone': phoneNumber,
-        'customerPhone': phoneNumber,
-        'processingMode': 'EXPRESS',
-        'agentId': await _getAgentId(),
+      final result = await _ussdChannel.invokeMethod('executeUssd', {
+        'ussdCode': ussdCode,
+        'phoneNumber': phoneNumber,
       });
       
-      final data = response.data;
-      AppLogger.d('USSD response: $data');
+      AppLogger.d('EXPRESS USSD result: $result');
+      return result['success'] ?? false;
       
-      return data['success'] ?? false;
-      
-    } on DioException catch (e) {
-      AppLogger.e('USSD execution failed:', e);
-      return false;
-    } catch (e) {
-      AppLogger.e('USSD execution error:', e);
+    } on PlatformException catch (e) {
+      AppLogger.e('EXPRESS USSD execution failed:', e);
       return false;
     }
   }
   
-  // Advanced mode - multi-step USSD (now handled by backend)
+  // Advanced mode - multi-step USSD
   Future<bool> executeAdvancedUssd({
     required String ussdCode,
     required String phoneNumber,
   }) async {
     try {
-      AppLogger.d('Sending Advanced USSD request to backend: $ussdCode for $phoneNumber');
+      AppLogger.d('Executing ADVANCED USSD: $ussdCode for $phoneNumber');
       
-      final response = await _dio.post('/ussd/execute', data: {
-        'action': 'INITIATE',
-        'routeCode': ussdCode,
-        'agentPhone': phoneNumber,
-        'customerPhone': phoneNumber,
-        'processingMode': 'ADVANCED',
-        'agentId': await _getAgentId(),
+      final result = await _ussdChannel.invokeMethod('executeAdvancedUssd', {
+        'ussdCode': ussdCode,
+        'phoneNumber': phoneNumber,
       });
       
-      return response.data['success'] ?? false;
+      AppLogger.d('ADVANCED USSD result: $result');
+      return result['success'] ?? false;
       
-    } on DioException catch (e) {
-      AppLogger.e('Advanced USSD execution failed:', e);
-      return false;
-    } catch (e) {
-      AppLogger.e('Advanced USSD execution error:', e);
+    } on PlatformException catch (e) {
+      AppLogger.e('ADVANCED USSD execution failed:', e);
       return false;
     }
   }
@@ -72,22 +58,76 @@ class UssdService {
   // Cancel ongoing USSD session
   Future<void> cancelUssd() async {
     try {
-      await _dio.post('/ussd/cancel');
-      AppLogger.d('USSD session cancelled');
-    } catch (e) {
+      await _ussdChannel.invokeMethod('cancelUssd');
+      AppLogger.d('USSD cancelled');
+    } on PlatformException catch (e) {
       AppLogger.e('Failed to cancel USSD:', e);
     }
   }
   
-  // Helper to get agent ID from secure storage
-  Future<String> _getAgentId() async {
-    // Import secure storage manager
-    final storage = await SecureStorageManager.getAgentId();
-    return storage ?? '';
+  // ===== AIRTIME BALANCE =====
+  
+  // Check current airtime balance
+  Future<double> checkAirtimeBalance() async {
+    try {
+      AppLogger.d('Checking airtime balance...');
+      
+      final result = await _airtimeChannel.invokeMethod('checkAirtimeBalance');
+      
+      AppLogger.d('Airtime balance result: $result');
+      return (result['balance'] as num?)?.toDouble() ?? 0.0;
+      
+    } on PlatformException catch (e) {
+      AppLogger.e('Failed to check airtime balance:', e);
+      return 0.0;
+    }
+  }
+  
+  // ===== SERVICE CONTROL =====
+  
+  // Start the background USSD service
+  Future<bool> startUssdService() async {
+    try {
+      AppLogger.d('Starting USSD background service...');
+      
+      final result = await _serviceChannel.invokeMethod('startService');
+      AppLogger.d('Service start result: $result');
+      return result ?? false;
+      
+    } on PlatformException catch (e) {
+      AppLogger.e('Failed to start USSD service:', e);
+      return false;
+    }
+  }
+  
+  // Stop the background USSD service
+  Future<bool> stopUssdService() async {
+    try {
+      AppLogger.d('Stopping USSD background service...');
+      
+      final result = await _serviceChannel.invokeMethod('stopService');
+      AppLogger.d('Service stop result: $result');
+      return result ?? false;
+      
+    } on PlatformException catch (e) {
+      AppLogger.e('Failed to stop USSD service:', e);
+      return false;
+    }
+  }
+  
+  // Check if service is running
+  Future<bool> isUssdServiceRunning() async {
+    try {
+      final result = await _serviceChannel.invokeMethod('isServiceRunning');
+      return result ?? false;
+      
+    } on PlatformException catch (e) {
+      AppLogger.e('Failed to check service status:', e);
+      return false;
+    }
   }
 }
 
 final ussdServiceProvider = Provider<UssdService>((ref) {
-  final dio = ref.watch(dioClientProvider);
-  return UssdService(dio);
+  return UssdService();
 });

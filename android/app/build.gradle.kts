@@ -72,4 +72,9 @@ dependencies {
     
     // Kotlin stdlib
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.1.0")
+
+    // ===== ADD THESE =====
+    // Coroutines for async operations
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
 }
