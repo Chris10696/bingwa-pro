@@ -78,4 +78,14 @@ export class TransactionsController {
       errorMessage: transaction.errorMessage,
     };
   }
+
+    @Post('record-sms-payment')
+  @UseGuards(JwtAuthGuard)
+  async recordSmsPayment(
+    @Body() body: { mpesaTransactionId: string; amount: number; customerPhone: string; agentId: string },
+    @Request() req,
+  ) {
+    // Returns 409 if duplicate, 201 if new
+    return this.transactionsService.recordSmsPayment(body, req.user.id);
+  }
 }

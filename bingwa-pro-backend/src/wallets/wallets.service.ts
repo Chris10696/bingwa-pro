@@ -382,7 +382,8 @@ export class WalletsService {
       const expired = await this.processExpiredTokens();
       this.logger.log(`Processed ${expired} expired tokens`);
     } catch (error) {
-      this.logger.error('Failed to process token expiry', error.stack);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error('Failed to process token expiry', err.stack);
     }
   }
   // =========================================================================

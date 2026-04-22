@@ -72,18 +72,16 @@ abstract class WalletTransaction with _$WalletTransaction {
 @freezed
 abstract class WalletBalance with _$WalletBalance {
   const factory WalletBalance({
-    required String agentId,
-    required double availableBalance,
-    required double pendingBalance,
-    required double totalBalance,
-    required double lockedBalance,
-    required DateTime lastUpdated,
+    @Default('') String agentId,
+    @Default(0.0) double availableBalance,
+    @Default(0.0) double pendingBalance,
+    @Default(0.0) double totalBalance,
+    @Default(0.0) double lockedBalance,
+    DateTime? lastUpdated,
     @Default(0.0) double totalDeposits,
     @Default(0.0) double totalWithdrawals,
     @Default(0.0) double totalCommission,
     @Default(0.0) double totalBonuses,
-    
-    // ===== TOKEN FIELDS - ADD THESE =====
     @Default(0) int tokenBalanceInt,
     @Default(0) int lifetimeTokens,
     @Default(0) int tokensConsumed,

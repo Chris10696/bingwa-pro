@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, LessThan, MoreThan } from 'typeorm';
 import { Transaction, TransactionType, TransactionStatus } from './entities/transaction.entity';
 import { Agent } from '../agents/entities/agent.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
+
 
 @Injectable()
 export class TransactionsService {
@@ -190,5 +191,23 @@ export class TransactionsService {
       totalAmount,
       period,
     };
+  }
+
+    async recordSmsPayment(data: any, agentId: string) {
+    // Check for duplicate
+    const existing = await this.transactionsRepository.findOne({
+      where: { mpesaTransactionId: data.mpesaTransactionId, agentId },
+    });
+    if (existing) {
+      throw new ConflictException('Payment already processed');
+    }
+    // Save record
+    const tx = this.transactionsRepository.create({
+      ...data,
+      agentId,
+      status: TransactionStatus.SUCCESS,
+      reference: data.mpesaTransactionId,
+    });
+    return this.transactionsRepository.save(tx);
   }
 }

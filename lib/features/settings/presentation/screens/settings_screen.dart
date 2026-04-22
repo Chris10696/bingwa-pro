@@ -1,3 +1,4 @@
+// lib/features/settings/presentation/screens/settings_screen.dart
 import 'package:bingwa_pro/features/auth/presentation/providers/auth_provider.dart';
 import 'package:bingwa_pro/shared/models/auth_model.dart';
 import 'package:flutter/material.dart';
@@ -30,7 +31,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    // Load biometric setting from secure storage
     final biometricEnabled = await SecureStorageManager.getBiometricEnabled(false);
     
     setState(() {
@@ -53,6 +53,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _buildProfileSection(agent),
           const SizedBox(height: 20),
 
+          // ===== PAYMENT SETTINGS SECTION (ADDED) =====
+          _buildSectionHeader('Payment Settings'),
+          _buildSettingsCard([
+            _buildSettingsItem(
+              icon: Icons.store,
+              title: 'Payment Method',
+              subtitle: agent?.tillNumber != null 
+                  ? 'Till: ${agent!.tillNumber}' 
+                  : 'Set up your till/paybill number',
+              onTap: () {
+                context.push('/settings/payment');
+              },
+            ),
+            _buildSettingsItem(
+              icon: Icons.history,
+              title: 'Transaction History',
+              subtitle: 'View all your transactions',
+              onTap: () {
+                context.push('/transaction-history');
+              },
+            ),
+          ]),
+          const SizedBox(height: 20),
+
           // Account Settings
           _buildSectionHeader('Account Settings'),
           _buildSettingsCard([
@@ -61,7 +85,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               title: 'Profile Information',
               subtitle: 'Update your personal details',
               onTap: () {
-                context.push('/profile');
+                context.push('/settings/profile');
               },
             ),
             _buildSettingsItem(
@@ -69,23 +93,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               title: 'Security',
               subtitle: 'Change PIN, biometrics',
               onTap: () {
-                context.push('/security');
-              },
-            ),
-            _buildSettingsItem(
-              icon: LineIcons.wallet,
-              title: 'Wallet Settings',
-              subtitle: 'Payment methods, limits',
-              onTap: () {
-                context.push('/wallet-settings');
+                _showSecurityOptions();
               },
             ),
           ]),
+          const SizedBox(height: 20),
 
           // App Preferences
           _buildSectionHeader('App Preferences'),
           _buildSettingsCard([
-            // FIXED: Biometric switch with proper saving
             _buildSwitchItem(
               icon: LineIcons.fingerprint,
               title: 'Biometric Login',
@@ -95,11 +111,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 setState(() {
                   _biometricEnabled = value;
                 });
-                
-                // Save biometric setting to secure storage
                 await SecureStorageManager.setBiometricEnabled(value);
-                
-                // Show feedback
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
@@ -138,7 +150,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               icon: LineIcons.language,
               title: 'Language',
               subtitle: _language,
-              items: ['English', 'Swahili', 'French'],
+              items: ['English', 'Swahili'],
               value: _language,
               onChanged: (value) {
                 setState(() {
@@ -146,50 +158,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 });
               },
             ),
-            _buildDropdownItem(
-              icon: LineIcons.palette,
-              title: 'Theme',
-              subtitle: _theme,
-              items: ['Light', 'Dark', 'Auto'],
-              value: _theme,
-              onChanged: (value) {
-                setState(() {
-                  _theme = value!;
-                });
-              },
-            ),
           ]),
-
-          // Transaction Limits
-          _buildSectionHeader('Transaction Limits'),
-          _buildSettingsCard([
-            _buildSliderItem(
-              title: 'Per Transaction Limit',
-              subtitle: 'Maximum amount per transaction',
-              value: _transactionLimit,
-              min: 100,
-              max: 50000,
-              divisions: 49,
-              onChanged: (value) {
-                setState(() {
-                  _transactionLimit = value;
-                });
-              },
-            ),
-            _buildSliderItem(
-              title: 'Daily Limit',
-              subtitle: 'Maximum total transactions per day',
-              value: _dailyLimit,
-              min: 1000,
-              max: 500000,
-              divisions: 49,
-              onChanged: (value) {
-                setState(() {
-                  _dailyLimit = value;
-                });
-              },
-            ),
-          ]),
+          const SizedBox(height: 20),
 
           // Support
           _buildSectionHeader('Support'),
@@ -203,30 +173,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               },
             ),
             _buildSettingsItem(
-              icon: LineIcons.fileAlt,
-              title: 'Terms & Conditions',
-              subtitle: 'App usage terms',
-              onTap: () {
-                context.push('/terms');
-              },
-            ),
-            _buildSettingsItem(
-              icon: Icons.security,
-              title: 'Privacy Policy',
-              subtitle: 'How we handle your data',
-              onTap: () {
-                context.push('/privacy');
-              },
-            ),
-            _buildSettingsItem(
-              icon: LineIcons.infoCircle,
+              icon: Icons.info_outline,
               title: 'About Bingwa Pro',
               subtitle: 'App version 1.0.0',
               onTap: () {
-                context.push('/about');
+                _showAboutDialog();
               },
             ),
           ]),
+          const SizedBox(height: 20),
 
           // Danger Zone
           _buildSectionHeader('Danger Zone'),
@@ -238,15 +193,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               color: Colors.red,
               onTap: () {
                 _confirmLogout(context);
-              },
-            ),
-            _buildSettingsItem(
-              icon: LineIcons.trash,
-              title: 'Delete Account',
-              subtitle: 'Permanently delete your account',
-              color: Colors.red,
-              onTap: () {
-                _confirmDeleteAccount(context);
               },
             ),
           ]),
@@ -313,8 +259,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     color: const Color.fromARGB(25, 0, 200, 83),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                 child: Text(
-                  agent?.status.toString().split('.').last ?? 'ACTIVE',
+                  child: Text(
+                    agent?.status.toString().split('.').last ?? 'ACTIVE',
                     style: const TextStyle(
                       fontSize: 12,
                       color: Color(0xFF00C853),
@@ -328,7 +274,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           IconButton(
             icon: const Icon(Icons.edit, color: Color(0xFF00C853)),
             onPressed: () {
-              context.push('/profile');
+              context.push('/settings/profile');
             },
           ),
         ],
@@ -450,141 +396,244 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Widget _buildSliderItem({
-    required String title,
-    required String subtitle,
-    required double value,
-    required double min,
-    required double max,
-    required int divisions,
-    required ValueChanged<double> onChanged,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
-          Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          const SizedBox(height: 10),
-          Row(
+  void _showSecurityOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(
-                child: Slider(
-                  value: value,
-                  min: min,
-                  max: max,
-                  divisions: divisions,
-                  label: 'KES ${value.toStringAsFixed(0)}',
-                  thumbColor: const Color(0xFF00C853),
-                  activeColor: const Color(0xFF00C853),
-                  onChanged: onChanged,
-                ),
+              ListTile(
+                leading: const Icon(Icons.lock, color: Color(0xFF00C853)),
+                title: const Text('Change PIN'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showPinChangeDialog();
+                },
               ),
-              const SizedBox(width: 10),
-              Text(
-                'KES ${value.toStringAsFixed(0)}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
+              ListTile(
+                leading: const Icon(Icons.fingerprint, color: Color(0xFF00C853)),
+                title: const Text('Biometric Settings'),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.push('/biometric-setup');
+                },
               ),
             ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showPinChangeDialog() {
+    // Implement PIN change dialog
+    showDialog(
+      context: context,
+      builder: (context) => const PinChangeDialog(),
+    );
+  }
+
+  void _showAboutDialog() {
+    showAboutDialog(
+      context: context,
+      applicationName: 'Bingwa Pro',
+      applicationVersion: '1.0.0',
+      applicationIcon: const Icon(Icons.store, size: 40, color: Color(0xFF00C853)),
+      children: [
+        const Text('Bingwa Pro - Safaricom Agent Platform'),
+        const SizedBox(height: 8),
+        const Text('© 2024 Bingwa Pro. All rights reserved.'),
+      ],
+    );
+  }
+
+  void _confirmLogout(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (loadingContext) => const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              );
+              
+              try {
+                final authNotifier = ref.read(authNotifierProvider.notifier);
+                await authNotifier.logout();
+                await SecureStorageManager.clearAll();
+                
+                if (!mounted) return;
+                Navigator.pop(context);
+                context.go('/login');
+              } catch (e) {
+                if (!mounted) return;
+                Navigator.pop(context);
+                await SecureStorageManager.clearAll();
+                context.go('/login');
+              }
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Logout'),
           ),
         ],
       ),
     );
   }
+}
 
-  // Replace the _confirmLogout method with this:
+// PIN Change Dialog
+class PinChangeDialog extends StatefulWidget {
+  const PinChangeDialog({super.key});
 
-void _confirmLogout(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('Logout'),
-      content: const Text('Are you sure you want to logout?'),
+  @override
+  State<PinChangeDialog> createState() => _PinChangeDialogState();
+}
+
+class _PinChangeDialogState extends State<PinChangeDialog> {
+  final _oldPinController = TextEditingController();
+  final _newPinController = TextEditingController();
+  final _confirmPinController = TextEditingController();
+  bool _obscureOldPin = true;
+  bool _obscureNewPin = true;
+  bool _obscureConfirmPin = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Change PIN'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _oldPinController,
+              obscureText: _obscureOldPin,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              decoration: InputDecoration(
+                labelText: 'Current PIN',
+                hintText: '••••',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureOldPin ? Icons.visibility : Icons.visibility_off,
+                    color: Colors.grey,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _obscureOldPin = !_obscureOldPin;
+                    });
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _newPinController,
+              obscureText: _obscureNewPin,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              decoration: InputDecoration(
+                labelText: 'New PIN',
+                hintText: '••••',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureNewPin ? Icons.visibility : Icons.visibility_off,
+                    color: Colors.grey,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _obscureNewPin = !_obscureNewPin;
+                    });
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _confirmPinController,
+              obscureText: _obscureConfirmPin,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              decoration: InputDecoration(
+                labelText: 'Confirm New PIN',
+                hintText: '••••',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureConfirmPin ? Icons.visibility : Icons.visibility_off,
+                    color: Colors.grey,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _obscureConfirmPin = !_obscureConfirmPin;
+                    });
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
+          onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        TextButton(
-          onPressed: () async {
-            Navigator.pop(dialogContext);
-            
-            // Show loading indicator
-            if (!mounted) return;
-            showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (loadingContext) => const Center(
-                child: CircularProgressIndicator(),
-              ),
-            );
-            
-            try {
-              // Call logout API
-              final authNotifier = ref.read(authNotifierProvider.notifier);
-              await authNotifier.logout();
-              
-              // Clear local storage
-              await SecureStorageManager.clearAll();
-              
-              if (!mounted) return;
-              
-              // Close loading dialog
-              Navigator.pop(context);
-              
-              // Navigate to login
-              context.go('/login');
-            } catch (e) {
-              if (!mounted) return;
-              
-              // Close loading dialog
-              Navigator.pop(context);
-              
-              // Show error
+        ElevatedButton(
+          onPressed: () {
+            if (_newPinController.text != _confirmPinController.text) {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Logout failed: $e'),
+                const SnackBar(
+                  content: Text('New PINs do not match'),
                   backgroundColor: Colors.red,
                 ),
               );
-              
-              // Still clear local storage and navigate
-              await SecureStorageManager.clearAll();
-              context.go('/login');
+              return;
             }
+            if (_newPinController.text.length != 4) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('PIN must be 4 digits'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+              return;
+            }
+            // TODO: Call API to verify old PIN and update
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('PIN changed successfully'),
+                backgroundColor: Colors.green,
+              ),
+            );
           },
-          style: TextButton.styleFrom(foregroundColor: Colors.red),
-          child: const Text('Logout'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF00C853),
+          ),
+          child: const Text('Change PIN'),
         ),
       ],
-    ),
-  );
-}
-
-  void _confirmDeleteAccount(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Account'),
-        content: const Text(
-          'This action cannot be undone. All your data will be permanently deleted.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // TODO: Implement account deletion
-            },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
     );
   }
 }

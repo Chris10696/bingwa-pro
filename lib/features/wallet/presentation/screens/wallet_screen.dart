@@ -1,4 +1,4 @@
-import 'package:bingwa_pro/shared/models/wallet_model.dart';
+// lib/features/wallet/presentation/screens/wallet_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/widgets/loading_indicator.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
 import '../../../../core/utils/formatters.dart';
+import '../../../../shared/models/wallet_model.dart';
 import '../providers/wallet_provider.dart';
 
 class WalletScreen extends ConsumerStatefulWidget {
@@ -17,7 +18,6 @@ class WalletScreen extends ConsumerStatefulWidget {
 
 class _WalletScreenState extends ConsumerState<WalletScreen> {
   final _scrollController = ScrollController();
-  bool _showTokenPackages = false;
 
   @override
   void initState() {
@@ -25,7 +25,6 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(walletNotifierProvider.notifier).loadWalletData();
     });
-
     _scrollController.addListener(_onScroll);
   }
 
@@ -47,37 +46,19 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     final state = ref.watch(walletNotifierProvider);
     final notifier = ref.read(walletNotifierProvider.notifier);
 
-    // Show success messages
-    if (state.transferSuccess != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(state.transferSuccess!),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-        notifier.clearError();
-      });
-    }
-
-    if (state.withdrawalSuccess != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(state.withdrawalSuccess!),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-        notifier.clearError();
-      });
-    }
-
     return Scaffold(
       appBar: const CustomAppBar(
-        title: 'Wallet',
+        title: 'Token Wallet',
         showBackButton: true,
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/top-up'),
+        backgroundColor: const Color(0xFF00C853),
+        icon: const Icon(Icons.add, color: Colors.white),
+        label: const Text(
+          'Buy Tokens',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
       ),
       body: state.isLoading && state.balance == null
           ? const LoadingIndicator(message: 'Loading wallet...')
@@ -85,713 +66,375 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               onRefresh: () => notifier.refresh(),
               child: ListView(
                 controller: _scrollController,
+                padding: const EdgeInsets.only(bottom: 100),
                 children: [
-                  // Balance Card
-                  _buildBalanceCard(state),
-                  const SizedBox(height: 20),
-
-                  // Token Stats Card
-                  _buildTokenStatsCard(state),
-                  const SizedBox(height: 20),
-
-                  // Quick Actions
-                  _buildQuickActions(state),
-                  const SizedBox(height: 20),
-
-                  // Token Packages Section (collapsible)
-                  _buildTokenPackagesSection(state),
-                  const SizedBox(height: 20),
-
-                  // Transactions Header
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Recent Transactions',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            context.push('/transaction-history');
-                          },
-                          child: const Text(
-                            'View All',
-                            style: TextStyle(color: Color(0xFF00C853)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Transactions List
+                  _buildTokenBalanceCard(state),
+                  const SizedBox(height: 16),
+                  _buildTokenStatsRow(state),
+                  const SizedBox(height: 16),
+                  _buildQuickActions(),
+                  const SizedBox(height: 16),
+                  _buildTokenPackagesTeaser(),
+                  const SizedBox(height: 16),
+                  _buildTransactionsHeader(),
                   _buildTransactionsList(state),
                 ],
               ),
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          context.push('/wallet/topup');
-        },
-        backgroundColor: const Color(0xFF00C853),
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text('Buy Tokens', style: TextStyle(color: Colors.white)),
-      ),
     );
   }
 
-  Widget _buildBalanceCard(WalletState state) {
-    final balance = state.balance?.availableBalance ?? 0.0;
-    final pending = state.balance?.pendingBalance ?? 0.0;
+  // ── Token balance card (primary widget) ────────────────────────────────────
+  Widget _buildTokenBalanceCard(WalletState state) {
+    final tokenBalance = state.balance?.tokenBalanceInt ?? 0;
+    final kesBalance = state.balance?.availableBalance ?? 0.0;
 
     return Container(
-      margin: const EdgeInsets.all(20),
-      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF00C853), Color(0xFF64DD17)],
+          colors: [Color(0xFF00C853), Color(0xFF1DE9B6)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.green.withValues(alpha: 0.3),
-            blurRadius: 10,
-            spreadRadius: 2,
+            color: const Color(0xFF00C853).withOpacity(0.35),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Available Balance',
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.white70,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            Formatters.formatCurrency(balance),
-            style: const TextStyle(
-              fontSize: 40,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          const Row(
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Pending',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.white70,
-                    ),
-                  ),
-                  Text(
-                    Formatters.formatCurrency(pending),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Total Deposits',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.white70,
-                    ),
-                  ),
-                  Text(
-                    Formatters.formatCurrency(state.balance?.totalDeposits ?? 0),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
+              Icon(Icons.token, color: Colors.white70, size: 18),
+              SizedBox(width: 6),
+              Text(
+                'TOKEN BALANCE',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  letterSpacing: 1.2,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '$tokenBalance',
+            style: const TextStyle(
+              fontSize: 52,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+              height: 1,
+            ),
+          ),
+          const Text(
+            'tokens',
+            style: TextStyle(color: Colors.white70, fontSize: 16),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.attach_money,
+                    color: Colors.white, size: 16),
+                const SizedBox(width: 4),
+                Text(
+                  'KES ${Formatters.formatCurrency(kesBalance)} available',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildTokenStatsCard(WalletState state) {
-    // Safe access to token fields with null checks
-    final tokenBalance = state.balance?.tokenBalanceInt ?? 0;
-    final lifetimeTokens = state.balance?.lifetimeTokens ?? 0;
-    final tokensConsumed = state.balance?.tokensConsumed ?? 0;
+  // ── Token stats row ─────────────────────────────────────────────────────────
+  Widget _buildTokenStatsRow(WalletState state) {
+    final lifetime = state.balance?.lifetimeTokens ?? 0;
+    final consumed = state.balance?.tokensConsumed ?? 0;
+    final pending = state.balance?.pendingBalance ?? 0.0;
 
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildStatCard(
+              label: 'Lifetime',
+              value: '$lifetime',
+              icon: Icons.all_inclusive,
+              color: Colors.blue,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildStatCard(
+              label: 'Consumed',
+              value: '$consumed',
+              icon: Icons.flash_on,
+              color: Colors.orange,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildStatCard(
+              label: 'Pending',
+              value: Formatters.formatCurrency(pending),
+              icon: Icons.hourglass_empty,
+              color: Colors.purple,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCard({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.1),
-            blurRadius: 5,
+            color: Colors.grey.withOpacity(0.08),
+            blurRadius: 6,
             spreadRadius: 1,
           ),
         ],
       ),
       child: Column(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Token Balance',
-                    style: TextStyle(fontSize: 14, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$tokenBalance',
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF00C853),
-                    ),
-                  ),
-                ],
-              ),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF00C853).withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.token,
-                  color: Color(0xFF00C853),
-                  size: 30,
-                ),
-              ),
-            ],
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+              color: color,
+            ),
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    Text(
-                      '$lifetimeTokens',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Text(
-                      'Lifetime',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  children: [
-                    Text(
-                      '$tokensConsumed',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Text(
-                      'Consumed',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  children: [
-                    Text(
-                      '${((tokensConsumed / (lifetimeTokens == 0 ? 1 : lifetimeTokens)) * 100).toStringAsFixed(1)}%',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Text(
-                      'Usage Rate',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(
-            value: lifetimeTokens == 0 ? 0 : tokensConsumed / lifetimeTokens,
-            backgroundColor: Colors.grey.shade200,
-            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF00C853)),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildTokenPackagesSection(WalletState state) {
+  // ── Quick actions ───────────────────────────────────────────────────────────
+  Widget _buildQuickActions() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildActionTile(
+              icon: Icons.add_circle_outline,
+              label: 'Buy Tokens',
+              color: const Color(0xFF00C853),
+              onTap: () => context.push('/top-up'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _buildActionTile(
+              icon: Icons.history,
+              label: 'Transactions',
+              color: Colors.blue,
+              onTap: () => context.push('/transaction-history'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionTile({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 26),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Token packages teaser ───────────────────────────────────────────────────
+  Widget _buildTokenPackagesTeaser() {
+    final packages = [
+      {'label': '50 tokens', 'price': 'KES 20', 'tag': 'Trial'},
+      {'label': '500 tokens', 'price': 'KES 150', 'tag': 'Starter'},
+      {'label': '2,500 tokens', 'price': 'KES 500', 'tag': 'Business'},
+      {'label': '10,000 tokens', 'price': 'KES 1,500', 'tag': 'Bulk'},
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
                 'Token Packages',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style:
+                    TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
-              IconButton(
-                icon: Icon(
-                  _showTokenPackages ? Icons.expand_less : Icons.expand_more,
+              TextButton(
+                onPressed: () => context.push('/top-up'),
+                child: const Text(
+                  'Buy Now',
+                  style: TextStyle(color: Color(0xFF00C853)),
                 ),
-                onPressed: () {
-                  setState(() {
-                    _showTokenPackages = !_showTokenPackages;
-                  });
-                },
               ),
             ],
           ),
         ),
-        if (_showTokenPackages)
-          SizedBox(
-            height: 220,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: 4, // Mock data - replace with actual token packages
-              itemBuilder: (context, index) {
-                return _buildTokenPackageCard(index);
-              },
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildTokenPackageCard(int index) {
-    // Mock data - replace with actual data from provider
-    final packages = [
-      {'name': 'Daily Trial', 'tokens': 50, 'price': 20, 'color': Colors.blue},
-      {'name': 'Weekly Starter', 'tokens': 500, 'price': 150, 'color': Colors.purple},
-      {'name': 'Monthly Business', 'tokens': 2500, 'price': 500, 'color': Colors.orange},
-      {'name': 'Bulk Trader', 'tokens': 10000, 'price': 1500, 'color': Colors.red},
-    ];
-
-    final package = packages[index];
-
-    return Container(
-      width: 160,
-      margin: const EdgeInsets.only(right: 12),
-      child: Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(15),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: (package['color'] as Color).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  Icons.token,
-                  color: package['color'] as Color,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                package['name'] as String,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${package['tokens']} tokens',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-              const Spacer(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'KES ${package['price']}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF00C853),
-                    ),
+        SizedBox(
+          height: 110,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: packages.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (context, i) {
+              final pkg = packages[i];
+              return InkWell(
+                onTap: () => context.push('/top-up'),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: 130,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade200),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.07),
+                        blurRadius: 6,
+                      ),
+                    ],
                   ),
-                  InkWell(
-                    onTap: () {
-                      // Navigate to topup with selected package
-                      context.push('/wallet/topup');
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF00C853),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Text(
-                        'Buy',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00C853).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          pkg['tag']!,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF00C853),
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickActions(WalletState state) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildActionButton(
-            icon: Icons.add,
-            label: 'Top Up',
-            isLoading: state.isPurchasingTokens,
-            onTap: () {
-              context.push('/wallet/topup');
-            },
-          ),
-          _buildActionButton(
-            icon: Icons.history,
-            label: 'History',
-            isLoading: false,
-            onTap: () {
-              context.push('/transaction-history');
-            },
-          ),
-          _buildActionButton(
-            icon: Icons.share,
-            label: 'Transfer',
-            isLoading: state.isTransferring,
-            onTap: () {
-              _showTransferDialog(state);
-            },
-          ),
-          _buildActionButton(
-            icon: Icons.download,
-            label: 'Withdraw',
-            isLoading: state.isWithdrawing,
-            onTap: () {
-              _showWithdrawalDialog(state);
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required bool isLoading,
-    required VoidCallback onTap,
-  }) {
-    return Column(
-      children: [
-        Container(
-          width: 60,
-          height: 60,
-          decoration: BoxDecoration(
-            color: const Color(0xFF00C853).withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-          ),
-          child: isLoading
-              ? const Padding(
-                  padding: EdgeInsets.all(15),
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Color(0xFF00C853),
-                  ),
-                )
-              : IconButton(
-                  icon: Icon(icon, color: const Color(0xFF00C853)),
-                  onPressed: onTap,
-                ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-        ),
-      ],
-    );
-  }
-
-  void _showTransferDialog(WalletState state) {
-    final amountController = TextEditingController();
-    final agentIdController = TextEditingController();
-    final descriptionController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Transfer Tokens'),
-        content: Form(
-          key: formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: agentIdController,
-                  decoration: const InputDecoration(
-                    labelText: 'Recipient Agent ID',
-                    hintText: 'Enter agent ID',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter recipient agent ID';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: amountController,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: 'Amount (Tokens)',
-                    hintText: 'Enter token amount',
-                    border: const OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter amount';
-                    }
-                    final amount = int.tryParse(value);
-                    if (amount == null || amount <= 0) {
-                      return 'Please enter a valid amount';
-                    }
-                    if (state.balance?.tokenBalanceInt != null && 
-                        amount > state.balance!.tokenBalanceInt) {
-                      return 'Insufficient tokens';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: descriptionController,
-                  decoration: const InputDecoration(
-                    labelText: 'Description (Optional)',
-                    hintText: 'Enter description',
-                    border: OutlineInputBorder(),
+                      const SizedBox(height: 6),
+                      Text(
+                        pkg['label']!,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        pkg['price']!,
+                        style: const TextStyle(
+                          color: Color(0xFF00C853),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-              
-              Navigator.pop(dialogContext);
-              
-              final amount = int.parse(amountController.text);
-              await ref.read(walletNotifierProvider.notifier).transferTokens(
-                toAgentId: agentIdController.text,
-                amount: amount.toDouble(),
-                description: descriptionController.text.isNotEmpty 
-                    ? descriptionController.text 
-                    : 'Token transfer',
               );
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00C853),
-            ),
-            child: const Text('Transfer'),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  void _showWithdrawalDialog(WalletState state) {
-    final amountController = TextEditingController();
-    final phoneController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    String selectedMethod = 'MPESA_TILL';
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setState) {
-          return AlertDialog(
-            title: const Text('Withdraw Tokens'),
-            content: Form(
-              key: formKey,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextFormField(
-                      controller: phoneController,
-                      keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(
-                        labelText: 'Phone Number',
-                        hintText: '07XX XXX XXX',
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter phone number';
-                        }
-                        if (!RegExp(r'^07\d{8}$').hasMatch(value)) {
-                          return 'Enter a valid Safaricom number';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: selectedMethod,
-                      decoration: const InputDecoration(
-                        labelText: 'Payment Method',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'MPESA_TILL',
-                          child: Text('M-Pesa Till Number'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'MPESA_PAYBILL',
-                          child: Text('M-Pesa PayBill'),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        setState(() {
-                          selectedMethod = value!;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: amountController,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: 'Amount (Tokens)',
-                        hintText: 'Enter token amount',
-                        border: const OutlineInputBorder(),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter amount';
-                        }
-                        final amount = int.tryParse(value);
-                        if (amount == null || amount <= 0) {
-                          return 'Please enter a valid amount';
-                        }
-                        if (state.balance?.tokenBalanceInt != null && 
-                            amount > state.balance!.tokenBalanceInt) {
-                          return 'Insufficient tokens';
-                        }
-                        return null;
-                      },
-                    ),
-                  ],
-                ),
-              ),
+  // ── Transactions ────────────────────────────────────────────────────────────
+  Widget _buildTransactionsHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            'Token History',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+          ),
+          TextButton(
+            onPressed: () => context.push('/transaction-history'),
+            child: const Text(
+              'All Transactions',
+              style: TextStyle(color: Color(0xFF00C853)),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  if (!formKey.currentState!.validate()) return;
-                  
-                  Navigator.pop(dialogContext);
-                  
-                  final amount = int.parse(amountController.text);
-                  await ref.read(walletNotifierProvider.notifier).withdrawTokens(
-                    amount: amount.toDouble(),
-                    phoneNumber: phoneController.text,
-                    paymentMethod: selectedMethod,
-                    description: 'Token withdrawal',
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF00C853),
-                ),
-                child: const Text('Withdraw'),
-              ),
-            ],
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -799,28 +442,42 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   Widget _buildTransactionsList(WalletState state) {
     final transactions = state.transactions ?? [];
 
+    if (state.isLoading && transactions.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(40),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     if (transactions.isEmpty) {
       return Container(
-        margin: const EdgeInsets.all(20),
-        padding: const EdgeInsets.all(40),
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(vertical: 40),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
           children: [
-            const Icon(Icons.receipt_long, size: 60, color: Colors.grey),
-            const SizedBox(height: 20),
+            Icon(Icons.token, size: 56, color: Colors.grey.shade300),
+            const SizedBox(height: 12),
             const Text(
-              'No transactions yet',
-              style: TextStyle(fontSize: 16, color: Colors.grey),
+              'No token purchases yet',
+              style: TextStyle(
+                  color: Colors.grey, fontWeight: FontWeight.w500),
             ),
-            const SizedBox(height: 10),
-            TextButton(
-              onPressed: () {
-                context.push('/wallet/topup');
-              },
-              child: const Text('Make your first top-up'),
+            const SizedBox(height: 6),
+            const Text(
+              'Buy tokens to start processing transactions',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => context.push('/top-up'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00C853),
+              ),
+              child: const Text('Buy Your First Tokens'),
             ),
           ],
         ),
@@ -830,87 +487,82 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: transactions.length + (state.hasMore ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == transactions.length) {
           return const Padding(
-            padding: EdgeInsets.all(20),
+            padding: EdgeInsets.all(16),
             child: Center(child: CircularProgressIndicator()),
           );
         }
-
-        final transaction = transactions[index];
-        return _buildTransactionItem(transaction);
+        return _buildTransactionItem(transactions[index]);
       },
     );
   }
 
   Widget _buildTransactionItem(WalletTransaction transaction) {
-    final isSuccess = transaction.status == WalletTransactionStatus.success;
-    final isPending = transaction.status == WalletTransactionStatus.pending;
+    final isPurchase =
+        transaction.type == WalletTransactionType.purchase;
+    final isSuccess =
+        transaction.status == WalletTransactionStatus.success;
+    final isPending =
+        transaction.status == WalletTransactionStatus.pending;
 
-    Color color;
-    IconData icon;
+    final color = isSuccess
+        ? Colors.green
+        : isPending
+            ? Colors.orange
+            : Colors.red;
 
-    if (isSuccess) {
-      color = Colors.green;
-      icon = Icons.check_circle;
-    } else if (isPending) {
-      color = Colors.orange;
-      icon = Icons.pending;
-    } else {
-      color = Colors.red;
-      icon = Icons.error;
-    }
+    final icon = isPurchase
+        ? Icons.add_circle
+        : transaction.type == WalletTransactionType.deduction
+            ? Icons.remove_circle
+            : Icons.swap_horiz;
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+      margin: const EdgeInsets.only(bottom: 8),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      elevation: 1,
       child: ListTile(
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: color),
+        leading: CircleAvatar(
+          backgroundColor: color.withOpacity(0.12),
+          child: Icon(icon, color: color, size: 20),
         ),
         title: Text(
-          transaction.type.name.toUpperCase(),
-          style: const TextStyle(fontWeight: FontWeight.w500),
+          transaction.type.name.toUpperCase().replaceAll('_', ' '),
+          style: const TextStyle(
+              fontWeight: FontWeight.w600, fontSize: 14),
         ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(transaction.reference),
-            Text(
-              DateFormat('dd MMM, HH:mm').format(transaction.timestamp),
-              style: const TextStyle(fontSize: 12),
-            ),
-            if (transaction.recipientAgentId != null)
-              Text('To: ${transaction.recipientAgentId}', style: const TextStyle(fontSize: 10)),
-            if (transaction.recipientPhone != null)
-              Text('To: ${transaction.recipientPhone}', style: const TextStyle(fontSize: 10)),
-          ],
+        subtitle: Text(
+          DateFormat('dd MMM yyyy, HH:mm').format(transaction.timestamp),
+          style: const TextStyle(fontSize: 12),
         ),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              '${transaction.amount > 0 ? '+' : ''}${transaction.amount} tokens',
+              '${isPurchase ? '+' : ''}${transaction.amount.toStringAsFixed(0)} tokens',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: color,
+                fontSize: 13,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              transaction.status.name.toUpperCase(),
-              style: TextStyle(
-                fontSize: 10,
-                color: color,
-                fontWeight: FontWeight.w500,
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                transaction.status.name.toUpperCase(),
+                style: TextStyle(
+                    fontSize: 9, color: color, fontWeight: FontWeight.bold),
               ),
             ),
           ],

@@ -18,6 +18,12 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
+    // ── ADDED: enables BuildConfig class generation ──────────────────────────
+    buildFeatures {
+        buildConfig = true
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     defaultConfig {
         applicationId = "com.example.bingwa_pro"
         minSdk = flutter.minSdkVersion
@@ -32,6 +38,8 @@ android {
     buildTypes {
         getByName("debug") {
             signingConfig = signingConfigs.getByName("debug")
+            // ── ADDED: backend URL for local WiFi testing ──────────────────
+            buildConfigField("String", "API_BASE_URL", "\"http://192.168.100.8:3000\"")
         }
         getByName("release") {
             signingConfig = signingConfigs.getByName("debug")
@@ -41,6 +49,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // ── ADDED: replace with your Railway URL before client delivery ─
+            buildConfigField("String", "API_BASE_URL", "\"https://your-railway-url.up.railway.app\"")
         }
     }
     
@@ -59,6 +69,8 @@ flutter {
 
 // Remove the force resolution strategy - use version catalogs instead
 dependencies {
+
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Core AndroidX dependencies
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")

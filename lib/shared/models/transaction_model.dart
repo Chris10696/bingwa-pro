@@ -41,11 +41,11 @@ enum TransactionStatus {
 
 // USSD Status
 enum UssdStatus {
-  @JsonValue('GREEN')
+  @JsonValue('green')
   green,    // All systems normal
-  @JsonValue('YELLOW')
+  @JsonValue('yellow')
   yellow,   // Degraded performance
-  @JsonValue('RED')
+  @JsonValue('red')
   red,      // System down or unstable
 }
 
@@ -186,11 +186,13 @@ abstract class TransactionFilter with _$TransactionFilter {
 @freezed
 abstract class TransactionListResponse with _$TransactionListResponse {
   const factory TransactionListResponse({
-    required List<TransactionDetails> transactions,
-    required int totalCount,
-    required int page,
-    required int pageSize,
-    required bool hasNextPage,
+    @Default([]) List<TransactionDetails> transactions,
+    @Default(0) int totalCount,
+    @Default(1) int page,
+    @Default(20) int pageSize,
+    @Default(false) bool hasNextPage,
+    @Default(0.0) double totalRevenue,
+    @Default(0.0) double successRate,
     TransactionSummary? summary,
   }) = _TransactionListResponse;
 
@@ -290,6 +292,7 @@ abstract class RetryRequest with _$RetryRequest {
 @freezed
 abstract class UssdHealthCheck with _$UssdHealthCheck {
   const factory UssdHealthCheck({
+    @JsonKey(unknownEnumValue: UssdStatus.red)
     required UssdStatus status,
     required DateTime lastChecked,
     @Default('') String message,

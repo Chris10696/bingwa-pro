@@ -1,4 +1,3 @@
-// lib/features/dashboard/presentation/providers/processing_provider.dart
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../shared/models/payment_notification.dart';
@@ -9,6 +8,15 @@ import '../../../wallet/presentation/providers/wallet_provider.dart';
 import '../../../transactions/presentation/providers/transaction_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../../core/utils/logger.dart';
+
+// ============================================================
+// TEST MODE FLAG
+// Set to true during testing to bypass token balance checks.
+// Set to false before going live with real agents.
+// ============================================================
+const bool kTestMode = true;
+// Set to true to disable backend polling during USSD engine testing
+const bool kDisableBackendPolling = false;
 
 enum ProcessingMode { express, advanced }
 enum ProcessingStatus { stopped, running, paused }
@@ -25,7 +33,7 @@ class ProcessingState {
   final String? lastError;
   final bool isCheckingPayments;
   final DateTime? lastCheckTime;
-  
+
   ProcessingState({
     this.status = ProcessingStatus.stopped,
     this.mode = ProcessingMode.express,
@@ -39,11 +47,11 @@ class ProcessingState {
     this.isCheckingPayments = false,
     this.lastCheckTime,
   });
-  
+
   bool get canProcess => status == ProcessingStatus.running;
-  
-  bool get hasEnoughTokens => true; // Will be overridden with wallet check
-  
+
+  bool get hasEnoughTokens => true;
+
   ProcessingState copyWith({
     ProcessingStatus? status,
     ProcessingMode? mode,
@@ -81,7 +89,7 @@ class ProcessedTransaction {
   final DateTime timestamp;
   final bool success;
   final int tokensUsed;
-  
+
   ProcessedTransaction({
     required this.id,
     required this.customerPhone,
@@ -93,7 +101,8 @@ class ProcessedTransaction {
   });
 }
 
-final processingProvider = StateNotifierProvider<ProcessingNotifier, ProcessingState>((ref) {
+final processingProvider =
+    StateNotifierProvider<ProcessingNotifier, ProcessingState>((ref) {
   return ProcessingNotifier(ref);
 });
 
@@ -101,16 +110,15 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
   final Ref _ref;
   Timer? _paymentCheckTimer;
   bool _isProcessing = false;
-  
+
   ProcessingNotifier(this._ref) : super(ProcessingState());
-  
-  // Start processing
+
   Future<void> startProcessing() async {
     try {
-      // Check if agent has till number set up
+      // Check if agent has till/paybill set up
       final authState = _ref.read(authNotifierProvider);
       final agent = authState.agent;
-      
+
       if (agent?.tillNumber == null && agent?.paybillNumber == null) {
         state = state.copyWith(
           lastError: 'Please set up your payment method first',
@@ -118,54 +126,51 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
         _showPaymentSetupRequired();
         return;
       }
-      
-      // Check token balance - FIXED: Use availableBalance from wallet
-      final walletState = _ref.read(walletNotifierProvider);
-      final tokenBalance = walletState.balance?.availableBalance ?? 0;
-          
-      if (tokenBalance <= 0) {
-        state = state.copyWith(
-          lastError: 'Insufficient tokens. Please purchase tokens first.',
-        );
-        _showInsufficientTokens();
-        return;
+
+      // TOKEN CHECK — skipped entirely in test mode
+      if (!kTestMode) {
+        final walletState = _ref.read(walletNotifierProvider);
+        final tokenBalance = walletState.balance?.availableBalance ?? 0;
+
+        if (tokenBalance <= 0) {
+          state = state.copyWith(
+            lastError: 'Insufficient tokens. Please purchase tokens first.',
+          );
+          _showInsufficientTokens();
+          return;
+        }
+      } else {
+        AppLogger.d('[TEST MODE] Token balance check bypassed for startProcessing');
       }
-      
-      // Start processing
+
       state = state.copyWith(
         status: ProcessingStatus.running,
         startedAt: DateTime.now(),
         lastError: null,
       );
-      
-      // Start payment monitoring
+
       _startPaymentMonitoring();
-      
-      // Log event
+
       AppLogger.logSessionEvent(
-        event: 'Processing started',
+        event: kTestMode ? '[TEST MODE] Processing started' : 'Processing started',
         details: 'Mode: ${state.mode}',
       );
-      
     } catch (e) {
       state = state.copyWith(
         lastError: 'Failed to start processing: ${e.toString()}',
       );
     }
   }
-  
-  // Pause processing
+
   void pauseProcessing() {
     state = state.copyWith(
       status: ProcessingStatus.paused,
       pausedAt: DateTime.now(),
     );
     _paymentCheckTimer?.cancel();
-    
     AppLogger.logSessionEvent(event: 'Processing paused');
   }
-  
-  // Stop processing
+
   void stopProcessing() {
     state = ProcessingState(
       mode: state.mode,
@@ -175,11 +180,9 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
       recentTransactions: state.recentTransactions,
     );
     _paymentCheckTimer?.cancel();
-    
     AppLogger.logSessionEvent(event: 'Processing stopped');
   }
-  
-  // Change mode
+
   void setMode(ProcessingMode mode) {
     state = state.copyWith(mode: mode);
     AppLogger.logSessionEvent(
@@ -187,42 +190,46 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
       details: 'New mode: $mode',
     );
   }
-  
+
   void _startPaymentMonitoring() {
-    _paymentCheckTimer?.cancel();
-    _paymentCheckTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
-      if (state.status == ProcessingStatus.running && !_isProcessing) {
-        _checkForPayments();
-      }
-    });
+  _paymentCheckTimer?.cancel();
+  
+  // Skip backend polling during USSD engine testing
+  if (kDisableBackendPolling) {
+    AppLogger.d('[TEST MODE] Backend polling disabled - using native SMS listener only');
+    return;
   }
   
+  _paymentCheckTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+    if (state.status == ProcessingStatus.running && !_isProcessing) {
+      _checkForPayments();
+    }
+  });
+}
+
   Future<void> _checkForPayments() async {
     if (_isProcessing) return;
-    
+
     _isProcessing = true;
-    state = state.copyWith(isCheckingPayments: true, lastCheckTime: DateTime.now());
-    
+    state = state.copyWith(
+        isCheckingPayments: true, lastCheckTime: DateTime.now());
+
     try {
-      // Get agent's payment settings
       final authState = _ref.read(authNotifierProvider);
       final agent = authState.agent;
-      
+
       if (agent == null) return;
-      
-      // Call backend to check for new payments
+
       final walletRepo = _ref.read(walletRepositoryProvider);
       final payments = await walletRepo.checkForPayments(
         tillNumber: agent.tillNumber,
         paybillNumber: agent.paybillNumber,
         lastCheckTime: state.lastCheckTime,
       );
-      
-      // Process each payment
+
       for (final payment in payments) {
         await _processPayment(payment);
       }
-      
     } catch (e) {
       AppLogger.e('Payment check failed:', e);
     } finally {
@@ -230,32 +237,34 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
       state = state.copyWith(isCheckingPayments: false);
     }
   }
-  
+
   Future<void> _processPayment(PaymentNotification payment) async {
     try {
-      // Check token balance first - FIXED: Use availableBalance
-      final walletState = _ref.read(walletNotifierProvider);
-      final tokenBalance = walletState.balance?.availableBalance ?? 0;
-          
-      if (tokenBalance < 1) {
-        // Auto-stop if no tokens
-        stopProcessing();
-        state = state.copyWith(
-          lastError: 'Processing stopped: Insufficient tokens',
-        );
-        return;
+      // TOKEN CHECK PER TRANSACTION — skipped in test mode
+      if (!kTestMode) {
+        final walletState = _ref.read(walletNotifierProvider);
+        final tokenBalance = walletState.balance?.availableBalance ?? 0;
+
+        if (tokenBalance < 1) {
+          stopProcessing();
+          state = state.copyWith(
+            lastError: 'Processing stopped: Insufficient tokens',
+          );
+          return;
+        }
+      } else {
+        AppLogger.d('[TEST MODE] Per-transaction token check bypassed');
       }
-      
-      // Determine which product was purchased based on amount
+
       final transactionRepo = _ref.read(transactionRepositoryProvider);
-      final product = await transactionRepo.findProductByPrice(payment.amount);
-      
+      final product =
+          await transactionRepo.findProductByPrice(payment.amount);
+
       if (product == null) {
         AppLogger.w('No product found for amount: ${payment.amount}');
         return;
       }
-      
-      // Execute USSD based on mode
+
       bool ussdSuccess;
       if (state.mode == ProcessingMode.express) {
         ussdSuccess = await _executeExpressUssd(
@@ -268,25 +277,29 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
           payment.customerPhone,
         );
       }
-      
+
       if (ussdSuccess) {
-        // Deduct token
-        await _ref.read(walletNotifierProvider.notifier).deductTokens(
-          amount: 1,
-          transactionId: payment.transactionId,
-          customerPhone: payment.customerPhone,
-          productId: product.id,
-        );
-        
-        // Record transaction
-        final transaction = await _ref.read(transactionProvider.notifier).recordTransaction(
-          customerPhone: payment.customerPhone,
-          amount: payment.amount,
-          productId: product.id,
-          reference: payment.transactionId,
-        );
-        
-        // Update state
+        // In test mode we skip actual token deduction from backend
+        if (!kTestMode) {
+          await _ref.read(walletNotifierProvider.notifier).deductTokens(
+                amount: 1,
+                transactionId: payment.transactionId,
+                customerPhone: payment.customerPhone,
+                productId: product.id,
+              );
+        } else {
+          AppLogger.d('[TEST MODE] Token deduction skipped');
+        }
+
+        final transaction = await _ref
+            .read(transactionProvider.notifier)
+            .recordTransaction(
+              customerPhone: payment.customerPhone,
+              amount: payment.amount,
+              productId: product.id,
+              reference: payment.transactionId,
+            );
+
         final newTransaction = ProcessedTransaction(
           id: transaction.id,
           customerPhone: payment.customerPhone,
@@ -294,17 +307,18 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
           product: product.name,
           timestamp: DateTime.now(),
           success: true,
-          tokensUsed: 1,
+          tokensUsed: kTestMode ? 0 : 1,
         );
-        
+
         state = state.copyWith(
           transactionsProcessed: state.transactionsProcessed + 1,
-          tokensConsumed: state.tokensConsumed + 1,
+          tokensConsumed: kTestMode ? state.tokensConsumed : state.tokensConsumed + 1,
           todayRevenue: state.todayRevenue + payment.amount,
-          recentTransactions: [newTransaction, ...state.recentTransactions].take(10).toList(),
+          recentTransactions: [newTransaction, ...state.recentTransactions]
+              .take(10)
+              .toList(),
         );
-        
-        // Log success
+
         AppLogger.logTransaction(
           type: product.type.toString(),
           phone: payment.customerPhone,
@@ -313,7 +327,6 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
           reference: payment.transactionId,
         );
       } else {
-        // Log failure
         AppLogger.logTransaction(
           type: product.type.toString(),
           phone: payment.customerPhone,
@@ -322,49 +335,41 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
           reference: payment.transactionId,
         );
       }
-      
     } catch (e) {
       AppLogger.e('Payment processing failed:', e);
     }
   }
-  
-  Future<bool> _executeExpressUssd(String ussdCode, String customerPhone) async {
+
+  Future<bool> _executeExpressUssd(
+      String ussdCode, String customerPhone) async {
     try {
-      // Use Android USSD API directly
-      final result = await _ref.read(ussdServiceProvider).executeUssd(
-        ussdCode: ussdCode,
-        phoneNumber: customerPhone,
-      );
-      
-      return result;
+      return await _ref.read(ussdServiceProvider).executeUssd(
+            ussdCode: ussdCode,
+            phoneNumber: customerPhone,
+          );
     } catch (e) {
       AppLogger.e('Express USSD execution failed:', e);
       return false;
     }
   }
-  
-  Future<bool> _executeAdvancedUssd(String ussdCode, String customerPhone) async {
+
+  Future<bool> _executeAdvancedUssd(
+      String ussdCode, String customerPhone) async {
     try {
-      final result = await _ref.read(ussdServiceProvider).executeAdvancedUssd(
-        ussdCode: ussdCode,
-        phoneNumber: customerPhone,
-      );
-      
-      return result;
+      return await _ref.read(ussdServiceProvider).executeAdvancedUssd(
+            ussdCode: ussdCode,
+            phoneNumber: customerPhone,
+          );
     } catch (e) {
       AppLogger.e('Advanced USSD execution failed:', e);
       return false;
     }
   }
-  
-  void _showPaymentSetupRequired() {
-    // This will be handled by UI
-  }
-  
-  void _showInsufficientTokens() {
-    // This will be handled by UI
-  }
-  
+
+  void _showPaymentSetupRequired() {}
+
+  void _showInsufficientTokens() {}
+
   @override
   void dispose() {
     _paymentCheckTimer?.cancel();

@@ -55,6 +55,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.1
   mockito: ^5.4.0
   build_runner: ^2.4.0
   freezed: ^3.2.4
@@ -68,3 +69,15 @@ flutter:
     - assets/animations/
     - assets/icons/
     - .env
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_icon.jpeg"
+  
+  # Android adaptive icon (for Android 8.0+)
+  adaptive_icon_background: "#FFFFFF"        # white background matches your logo
+  adaptive_icon_foreground: "assets/images/app_icon.jpeg"
+
+  # Removes the notification icon (uses same icon for everything)
+  android_generate_v9_icons: true

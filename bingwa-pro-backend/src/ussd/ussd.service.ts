@@ -75,7 +75,8 @@ export class UssdService {
       return `END Invalid selection. Please try again.`;
       
     } catch (error) {
-      this.logger.error(`USSD callback error: ${error.message}`, error.stack);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`USSD callback error: ${err.message}`, err.stack);
       return `END An error occurred. Please try again later.`;
     }
   }
@@ -393,7 +394,8 @@ Enter choice:`;
       return `END Transaction completed.`;
       
     } catch (error) {
-      this.logger.error(`Transaction error: ${error.message}`, error.stack);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`Transaction error: ${err.message}`, err.stack);
       return `END Transaction failed. Please try again.`;
     }
   }
@@ -451,7 +453,8 @@ Status: ${agent.status}`;
       };
       
     } catch (error) {
-      this.logger.error(`Africa's Talking API error: ${error.message}`, error.stack);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`Africa's Talking API error: ${err.message}`, err.stack);
       
       // Fallback simulation for testing
       this.logger.warn('Using fallback simulation for USSD');

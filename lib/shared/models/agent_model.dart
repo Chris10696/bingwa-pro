@@ -23,7 +23,7 @@ enum AgentStatus {
 @freezed
 abstract class AgentStats with _$AgentStats {
   const factory AgentStats({
-    required String agentId,
+    @Default('') String agentId,
     @Default(0.0) double todaySales,
     @Default(0.0) double weekSales,
     @Default(0.0) double monthSales,

@@ -10,6 +10,7 @@ import { MpesaCallbackDto } from './dto/mpesa-callback.dto';
 import { getMpesaConfig, getBaseUrl } from './config/mpesa.config';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { Agent } from '../agents/entities/agent.entity';
+import axios from 'axios';
 
 @Injectable()
 export class MpesaService {
@@ -169,12 +170,12 @@ export class MpesaService {
         throw new BadRequestException(responseData.ResponseDescription || 'STK push failed');
       }
     } catch (error) {
-      this.logger.error(`STK push failed: ${error.message}`, error.stack);
-      throw new HttpException(
-        error.message || 'Failed to initiate M-Pesa payment',
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+  if (axios.isAxiosError(error)) {
+    this.logger.error(`M-Pesa failed: ${error.message}`, error.stack);
+    throw error;   // AxiosError has .status natively — no cast needed
+  }
+  throw new Error(String(error));
+}
   }
 
   /**
@@ -230,7 +231,8 @@ export class MpesaService {
       this.logger.log(`Callback processed for transaction ${transaction.id}`);
 
     } catch (error) {
-      this.logger.error(`Callback handling failed: ${error.message}`, error.stack);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`Callback handling failed: ${err.message}`, err.stack);
       // Don't throw - just log the error, M-Pesa doesn't need a response
     }
   }
@@ -281,7 +283,8 @@ export class MpesaService {
       this.logger.log(`Credited ${tokenAmount} tokens to agent ${agent.id}`);
 
     } catch (error) {
-      this.logger.error(`Failed to credit tokens: ${error.message}`, error.stack);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`Failed to credit tokens: ${err.message}`, err.stack);
       // Don't throw - just log, we'll retry later
     }
   }
@@ -312,7 +315,8 @@ export class MpesaService {
         isTokenCredited: transaction.isTokenCredited,
       };
     } catch (error) {
-      this.logger.error(`Query status failed: ${error.message}`, error.stack);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error(`Query status failed: ${err.message}`, err.stack);
       throw error;
     }
   }

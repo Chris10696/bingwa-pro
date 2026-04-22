@@ -1,5 +1,5 @@
 // bingwa-pro-backend/src/transactions/entities/transaction.entity.ts
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Unique } from 'typeorm';
 import { Agent } from '../../agents/entities/agent.entity';
 
 export enum TransactionType {
@@ -21,6 +21,7 @@ export enum TransactionStatus {
 }
 
 @Entity('transactions')
+@Unique(['mpesaTransactionId', 'agentId'])
 export class Transaction {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -139,4 +140,7 @@ export class Transaction {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @Column({ nullable: true, unique: false })  // not globally unique, but unique per agent (enforced by @Unique above)
+  mpesaTransactionId: string;
 }
