@@ -1,7 +1,7 @@
 class ApiConstants {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://192.168.100.8:3000',
+    defaultValue: 'https://observant-smile-production-a472.up.railway.app/',
   );
   
   // Auth Endpoints

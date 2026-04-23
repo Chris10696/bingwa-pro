@@ -63,7 +63,7 @@ export class AuthService {
       agent.pinHash = hashedPin; // Now this exists in entity
       agent.businessName = registerDto.businessName || " ";
       agent.location = registerDto.location || " ";
-      agent.status = AgentStatus.PENDING;
+      agent.status = AgentStatus.ACTIVE;
       agent.deviceId = registerDto.deviceId; // Now this exists in entity
       agent.platform = registerDto.platform || 'android'; // Now this exists in entity
 

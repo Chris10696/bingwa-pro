@@ -50,7 +50,7 @@ android {
                 "proguard-rules.pro"
             )
             // ── ADDED: replace with your Railway URL before client delivery ─
-            buildConfigField("String", "API_BASE_URL", "\"https://your-railway-url.up.railway.app\"")
+            buildConfigField("String", "API_BASE_URL", "\"https://observant-smile-production-a472.up.railway.app\"")
         }
     }
     
