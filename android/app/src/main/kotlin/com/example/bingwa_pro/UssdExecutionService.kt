@@ -27,12 +27,26 @@ class UssdExecutionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "USSD Execution Service started")
-        isRunning = true
-        startForeground(NOTIFICATION_ID, createNotification())
-        Log.d(TAG, "Foreground service active — M-PESA receiver is live via manifest")
-        return START_STICKY
+    Log.d(TAG, "USSD Execution Service started")
+    isRunning = true
+
+    val notification = createNotification()
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        // Android 14+ requires explicit foreground service type at runtime
+        startForeground(
+            NOTIFICATION_ID,
+            notification,
+            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
+    } else {
+        startForeground(NOTIFICATION_ID, notification)
     }
+
+    Log.d(TAG, "Foreground service active — M-PESA receiver is live via manifest")
+    return START_STICKY
+}
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

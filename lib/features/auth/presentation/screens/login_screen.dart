@@ -21,28 +21,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.initState();
     // Add a listener to handle navigation when auth state changes
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.listenManual(authNotifierProvider, (previous, next) {
-        if (next.isAuthenticated && mounted) {
-          if (next.requiresBiometricSetup) {
-            context.push('/biometric-setup');
-          } else {
-            context.go('/dashboard');
-          }
-        } else if (next.errorMessage != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(next.errorMessage!),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+    if (!mounted) return;
+    ref.listenManual<AuthState>(authNotifierProvider, (previous, next) {
+      if (!mounted) return;
+      if (next.errorMessage != null && previous?.errorMessage != next.errorMessage) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.errorMessage!),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
             ),
-          );
-        }
-      });
+          ),
+        );
+      }
     });
-  }
+  });
+}
 
   @override
   Widget build(BuildContext context) {

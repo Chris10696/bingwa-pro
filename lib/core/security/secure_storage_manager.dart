@@ -59,10 +59,10 @@ class SecureStorageManager {
       // Validate existing data
       await _validateStorage();
       
-    } catch (e) {
-      AppLogger.e('Storage initialization failed', e);
-      // If initialization fails, clear corrupted data
-      await forceClearCorruptedStorage();
+    } catch (e, st) {
+  AppLogger.e('Storage initialization failed (continuing without clearing)', e, st);
+  // Do NOT forceClearCorruptedStorage here — that nukes the user's session
+  // on any transient init error. Let the real failure surface organically.
     }
   }
 
@@ -121,8 +121,8 @@ class SecureStorageManager {
               try {
                 _encrypter.decrypt64(value, iv: _iv);
               } catch (e) {
-                AppLogger.w('Corrupted encrypted data detected for key: $key');
-                await _delete(key);
+                AppLogger.w('Decrypt validation failed for key: $key — leaving as-is. '
+                'Will surface as a login failure if it persists.');
               }
             }
           }

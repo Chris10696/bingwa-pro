@@ -133,9 +133,9 @@ class _TillRegistrationScreenState extends ConsumerState<TillRegistrationScreen>
                             (value == null || value.isEmpty)) {
                           return 'Please enter your till number';
                         }
-                        if (value != null && value.isNotEmpty ) {
-                          return 'Till number cannot be empty';
-                        }
+                        //if (value != null && value.isNotEmpty ) {
+                         // return 'Till number cannot be empty';
+                        //}
                         return null;
                       },
                     ),

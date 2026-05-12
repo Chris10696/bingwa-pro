@@ -1,66 +1,97 @@
+// lib/main.dart
+import 'dart:async';
+import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'app_router.dart';
-import 'core/utils/session_manager.dart';
-import 'features/auth/presentation/providers/auth_provider.dart';
-import 'core/security/secure_storage_manager.dart';
 
-// Global navigator key for navigation without BuildContext
-// Note: This is used by the auth interceptor but not directly by MaterialApp.router
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+import 'app_router.dart';
+import 'core/auth/auth_state_provider.dart';
+import 'core/security/secure_storage_manager.dart';
+import 'core/utils/logger.dart';
 
 Future<void> main() async {
-  // Load environment variables
-  await dotenv.load(fileName: '.env');
-  
-  // Initialize Flutter
-  WidgetsFlutterBinding.ensureInitialized();
+  // Catch ALL uncaught errors — including those thrown from plugin callbacks,
+  // microtasks, and unhandled futures.
+  await runZonedGuarded(() async {
+    // 1. MUST be first. Plugin calls (dotenv, secure_storage) require it.
+    WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize secure storage
-  await SecureStorageManager.initialize();
-  
-  // TODO: Initialize other services (Firebase, Sentry, etc.)
-  
-  runApp(const ProviderScope(child: BingwaProApp()));
+    // 2. Hook framework errors so they're logged instead of crashing the UI.
+    FlutterError.onError = (details) {
+      AppLogger.e('FlutterError', details.exception, details.stack);
+      FlutterError.presentError(details);
+    };
+
+    // 3. Hook errors thrown from platform code (Kotlin/Java).
+    PlatformDispatcher.instance.onError = (error, stack) {
+      AppLogger.e('PlatformDispatcher error', error, stack);
+      return true; // signal: handled
+    };
+
+    // 4. Load .env. Don't crash if it's missing — fall back to defaults.
+    try {
+      await dotenv.load(fileName: '.env');
+    } catch (e, st) {
+      AppLogger.w('dotenv.load failed (continuing with defaults)', e, st);
+    }
+
+    // 5. Initialize secure storage. Don't crash on transient errors.
+    try {
+      await SecureStorageManager.initialize();
+    } catch (e, st) {
+      AppLogger.e('SecureStorageManager.initialize failed', e, st);
+    }
+
+    // 6. Pre-resolve auth state BEFORE building the router. This is the
+    //    key fix for the session-persistence bug: previously this happened
+    //    async in initState and raced against router redirect.
+    final initialAuth = await _resolveInitialAuthState();
+    AppLogger.i('Initial auth state resolved: $initialAuth');
+
+    runApp(
+      ProviderScope(
+        overrides: [
+          initialAuthStateProvider.overrideWithValue(initialAuth),
+        ],
+        child: const BingwaProApp(),
+      ),
+    );
+  }, (error, stack) {
+    AppLogger.e('Uncaught zone error', error, stack);
+  });
 }
 
-class BingwaProApp extends ConsumerStatefulWidget {
+Future<bool> _resolveInitialAuthState() async {
+  try {
+    return await SecureStorageManager.isSessionValid();
+  } catch (e, st) {
+    AppLogger.e('Auth state resolution failed', e, st);
+    return false;
+  }
+}
+
+class BingwaProApp extends ConsumerWidget {
   const BingwaProApp({super.key});
 
   @override
-  ConsumerState<BingwaProApp> createState() => _BingwaProAppState();
-}
-
-class _BingwaProAppState extends ConsumerState<BingwaProApp> {
-  @override
-  void initState() {
-    super.initState();
-    _restoreSession();
-  }
-  
-  Future<void> _restoreSession() async {
-    // Small delay to ensure providers are initialized
-    await Future.delayed(const Duration(milliseconds: 100));
-    final sessionManager = ref.read(sessionManagerProvider);
-    await sessionManager.restoreSession();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Watch auth state but we don't need to use it directly here
-    // The router provider will handle redirects based on auth state
-    ref.watch(authNotifierProvider);
-    
-    // Get the router from the provider
+  Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
-    
+
     return MaterialApp.router(
       title: 'Bingwa Pro',
       debugShowCheckedModeBanner: false,
-      // navigatorKey is not a parameter on MaterialApp.router
-      // The router handles navigation internally
-      theme: ThemeData(
+      theme: _buildLightTheme(),
+      darkTheme: _buildDarkTheme(),
+      themeMode: ThemeMode.light,
+      routerConfig: router,
+    );
+  }
+
+  // --- Theme builders extracted for readability — content unchanged from
+  //     your previous main.dart ---
+  ThemeData _buildLightTheme() => ThemeData(
         primarySwatch: Colors.green,
         primaryColor: const Color(0xFF00C853),
         colorScheme: const ColorScheme.light(
@@ -110,10 +141,7 @@ class _BingwaProAppState extends ConsumerState<BingwaProApp> {
             borderRadius: BorderRadius.circular(10),
             borderSide: const BorderSide(color: Colors.red, width: 2),
           ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 14,
-          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           labelStyle: const TextStyle(color: Colors.grey),
           hintStyle: const TextStyle(color: Colors.grey),
         ),
@@ -125,10 +153,7 @@ class _BingwaProAppState extends ConsumerState<BingwaProApp> {
               borderRadius: BorderRadius.circular(10),
             ),
             padding: const EdgeInsets.symmetric(vertical: 16),
-            textStyle: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
+            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             elevation: 0,
           ),
         ),
@@ -140,18 +165,13 @@ class _BingwaProAppState extends ConsumerState<BingwaProApp> {
               borderRadius: BorderRadius.circular(10),
             ),
             padding: const EdgeInsets.symmetric(vertical: 16),
-            textStyle: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
+            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
         ),
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
             foregroundColor: const Color(0xFF00C853),
-            textStyle: const TextStyle(
-              fontWeight: FontWeight.w600,
-            ),
+            textStyle: const TextStyle(fontWeight: FontWeight.w600),
           ),
         ),
         cardTheme: const CardThemeData(
@@ -168,8 +188,9 @@ class _BingwaProAppState extends ConsumerState<BingwaProApp> {
           ),
         ),
         useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
+      );
+
+  ThemeData _buildDarkTheme() => ThemeData(
         brightness: Brightness.dark,
         primaryColor: const Color(0xFF00C853),
         colorScheme: const ColorScheme.dark(
@@ -182,9 +203,5 @@ class _BingwaProAppState extends ConsumerState<BingwaProApp> {
         scaffoldBackgroundColor: const Color(0xFF121212),
         cardColor: const Color(0xFF1E1E1E),
         dialogBackgroundColor: const Color(0xFF1E1E1E),
-      ),
-      themeMode: ThemeMode.light,
-      routerConfig: router,
-    );
-  }
+      );
 }

@@ -14,6 +14,11 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.*
+import android.content.ActivityNotFoundException
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
+import android.content.Context
 
 class MainActivity : FlutterActivity() {
 
@@ -45,6 +50,7 @@ class MainActivity : FlutterActivity() {
         ussdEngine     = UssdEngine(this)
         airtimeChecker = AirtimeChecker(this)
         requestAllPermissions()
+        requestBatteryOptimizationExemption()
         startUssdService()
     }
 
@@ -264,6 +270,32 @@ class MainActivity : FlutterActivity() {
                 .map     { it.first }
             Log.d(TAG, "Granted permissions: ${granted.joinToString()}")
             Toast.makeText(this, "Permissions granted. Bingwa Pro is ready.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+        /**
+    * Prompts the user to exempt Bingwa Pro from battery optimization. Without
+    * this, Android's Doze mode will silently kill our foreground service after
+    * the screen has been off for an extended period, breaking 24/7 USSD
+    * monitoring.
+    *
+    * The Intent opens system settings; the user has to tap "Allow" themselves.
+    * Safe to call repeatedly — system shows nothing if already granted.
+    */
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) {
+            Log.d(TAG, "Battery optimization already exempted")
+            return
+        }
+        try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "Battery optimization settings not available on this device", e)
         }
     }
 }

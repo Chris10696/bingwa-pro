@@ -8,6 +8,7 @@ import '../../../../shared/repositories/wallet_repository.dart'; // ADD THIS IMP
 import '../../../../core/utils/validators.dart';
 import '../../../../core/security/secure_storage_manager.dart';
 import '../../../../core/security/device_fingerprint.dart';
+import '../../../../core/auth/auth_state_provider.dart';
 
 // Form Models
 class PhoneNumber extends FormzInput<String, String> {
@@ -236,6 +237,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         requiresBiometricSetup: response.requiresBiometricSetup,
         errorMessage: null,
       );
+
+      _ref.read(authStateProvider.notifier).markAuthenticated();
     } catch (e) {
       String errorMsg = e.toString();
       // Clean up error message
@@ -437,6 +440,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       
       // Reset state
       state = AuthState();
+      _ref.read(authStateProvider.notifier).markUnauthenticated();
       
       AppLogger.logSessionEvent(event: 'Logout successful');
     } catch (e) {
@@ -497,6 +501,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         isLoading: false,
         requiresBiometricSetup: response.requiresBiometricSetup,
       );
+
+      _ref.read(authStateProvider.notifier).markAuthenticated();
     } catch (e) {
       state = state.copyWith(
         status: FormzSubmissionStatus.failure,
@@ -504,6 +510,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         isLoading: false,
         isAuthenticated: false,
       );
+
+      _ref.read(authStateProvider.notifier).markUnauthenticated();
     }
   }
   
