@@ -1,7 +1,13 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+// bingwa-pro-backend/src/agents/agents.service.ts
+// W1 ripple edit: getProfile() drops tokenBalance (wallet no longer has it).
+// All other methods preserved verbatim.
+import {
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Agent, AgentStatus } from './entities/agent.entity'; // Add AgentStatus import
+import { Agent, AgentStatus } from './entities/agent.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 
 @Injectable()
@@ -18,11 +24,9 @@ export class AgentsService {
       where: { id },
       relations: ['wallet'],
     });
-
     if (!agent) {
       throw new NotFoundException('Agent not found');
     }
-
     return agent;
   }
 
@@ -31,17 +35,16 @@ export class AgentsService {
       where: { phoneNumber },
       relations: ['wallet'],
     });
-
     if (!agent) {
       throw new NotFoundException('Agent not found');
     }
-
     return agent;
   }
 
   async getProfile(agentId: string): Promise<any> {
     const agent = await this.findById(agentId);
-
+    // W1: tokenBalance removed. Clients read balance state from
+    // /wallet/balance which returns plan-based info.
     return {
       id: agent.id,
       fullName: agent.fullName,
@@ -51,17 +54,14 @@ export class AgentsService {
       businessName: agent.businessName || '',
       location: agent.location || '',
       status: agent.status,
-      tokenBalance: agent.wallet?.tokenBalance || 0,
       registeredAt: agent.createdAt,
       lastLoginAt: agent.updatedAt,
     };
   }
 
   async getStats(agentId: string): Promise<any> {
-    const agent = await this.findById(agentId);
-
-    // In a real implementation, you would query transactions table
-    // For now, return mock data
+    await this.findById(agentId);
+    // W5: replace with real query against transactions table.
     return {
       totalTransactions: 0,
       successfulTransactions: 0,
@@ -73,17 +73,17 @@ export class AgentsService {
     };
   }
 
-  // FIXED: Use AgentStatus enum
   async updateStatus(agentId: string, status: AgentStatus): Promise<Agent> {
     const agent = await this.findById(agentId);
-    
     agent.status = status;
     return this.agentsRepository.save(agent);
   }
 
-  async updateProfile(agentId: string, updateData: Partial<Agent>): Promise<Agent> {
+  async updateProfile(
+    agentId: string,
+    updateData: Partial<Agent>,
+  ): Promise<Agent> {
     const agent = await this.findById(agentId);
-    
     Object.assign(agent, updateData);
     return this.agentsRepository.save(agent);
   }
@@ -92,29 +92,28 @@ export class AgentsService {
     page: number = 1,
     limit: number = 10,
     status?: string,
-  ): Promise<{ agents: Agent[]; total: number; page: number; limit: number }> {
-    const queryBuilder = this.agentsRepository.createQueryBuilder('agent')
+  ): Promise<{
+    agents: Agent[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const queryBuilder = this.agentsRepository
+      .createQueryBuilder('agent')
       .leftJoinAndSelect('agent.wallet', 'wallet')
       .skip((page - 1) * limit)
       .take(limit)
       .orderBy('agent.createdAt', 'DESC');
-
     if (status) {
       queryBuilder.where('agent.status = :status', { status });
     }
-
     const [agents, total] = await queryBuilder.getManyAndCount();
-
-    return {
-      agents,
-      total,
-      page,
-      limit,
-    };
+    return { agents, total, page, limit };
   }
 
   async searchAgents(query: string): Promise<Agent[]> {
-    return this.agentsRepository.createQueryBuilder('agent')
+    return this.agentsRepository
+      .createQueryBuilder('agent')
       .where('agent.phoneNumber ILIKE :query', { query: `%${query}%` })
       .orWhere('agent.fullName ILIKE :query', { query: `%${query}%` })
       .orWhere('agent.nationalId ILIKE :query', { query: `%${query}%` })

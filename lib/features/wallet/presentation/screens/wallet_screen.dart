@@ -1,12 +1,22 @@
 // lib/features/wallet/presentation/screens/wallet_screen.dart
+// W1: minimum-fix per Q6.
+//   - Token Balance card → Subscription Status card (plan-status readout)
+//   - Stats row simplified to 2 cards (Lifetime Purchased / Lifetime Consumed)
+//   - Hardcoded packages teaser → fed from state.packages (Q7)
+//   - Transaction list now renders SubscriptionPurchase rows (Q5 rename)
+//
+// TODO(wave-2): redesign as subscription-plans list per Hybrid screenshot 1
+//   (Balance header at top + plan rows + Subscribe button + promo code link).
+//   W1 keeps the existing UI shell to avoid encroaching on W2's scope.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/widgets/loading_indicator.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
-import '../../../../core/utils/formatters.dart';
 import '../../../../shared/models/wallet_model.dart';
+import '../../../../shared/models/subscription_package_model.dart';
+import '../../../../shared/models/subscription_plan_model.dart';
 import '../providers/wallet_provider.dart';
 
 class WalletScreen extends ConsumerStatefulWidget {
@@ -31,7 +41,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   void _onScroll() {
     if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent - 200) {
-      ref.read(walletNotifierProvider.notifier).loadMoreTransactions();
+      ref.read(walletNotifierProvider.notifier).loadMorePurchases();
     }
   }
 
@@ -48,7 +58,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
 
     return Scaffold(
       appBar: const CustomAppBar(
-        title: 'Token Wallet',
+        title: 'Subscription',
         showBackButton: true,
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -56,7 +66,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         backgroundColor: const Color(0xFF00C853),
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text(
-          'Buy Tokens',
+          'Subscribe',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
       ),
@@ -68,26 +78,28 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 controller: _scrollController,
                 padding: const EdgeInsets.only(bottom: 100),
                 children: [
-                  _buildTokenBalanceCard(state),
+                  _buildSubscriptionStatusCard(state),
                   const SizedBox(height: 16),
-                  _buildTokenStatsRow(state),
+                  _buildLifetimeStatsRow(state),
                   const SizedBox(height: 16),
                   _buildQuickActions(),
                   const SizedBox(height: 16),
-                  _buildTokenPackagesTeaser(),
+                  _buildPackagesTeaser(state),
                   const SizedBox(height: 16),
-                  _buildTransactionsHeader(),
-                  _buildTransactionsList(state),
+                  _buildPurchasesHeader(),
+                  _buildPurchasesList(state),
                 ],
               ),
             ),
     );
   }
 
-  // ── Token balance card (primary widget) ────────────────────────────────────
-  Widget _buildTokenBalanceCard(WalletState state) {
-    final tokenBalance = state.balance?.tokenBalanceInt ?? 0;
-    final kesBalance = state.balance?.availableBalance ?? 0.0;
+  // ── Subscription status card (replaces Token Balance card) ─────────────────
+  Widget _buildSubscriptionStatusCard(WalletState state) {
+    final plans = state.balance?.plans ?? const <SubscriptionPlan>[];
+    final unlimited = _firstUnlimited(plans);
+    final limited = _firstLimited(plans);
+    final hasAny = unlimited != null || limited != null;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -101,7 +113,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF00C853).withOpacity(0.35),
+            color: const Color(0xFF00C853).withValues(alpha: 0.35),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),
@@ -112,10 +124,10 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         children: [
           const Row(
             children: [
-              Icon(Icons.token, color: Colors.white70, size: 18),
+              Icon(Icons.card_membership, color: Colors.white70, size: 18),
               SizedBox(width: 6),
               Text(
-                'TOKEN BALANCE',
+                'SUBSCRIPTION STATUS',
                 style: TextStyle(
                   color: Colors.white70,
                   fontSize: 13,
@@ -125,35 +137,59 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            '$tokenBalance',
-            style: const TextStyle(
-              fontSize: 52,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-              height: 1,
-            ),
-          ),
-          const Text(
-            'tokens',
-            style: TextStyle(color: Colors.white70, fontSize: 16),
-          ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+          if (!hasAny)
+            const Text(
+              'No active plan',
+              style: TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            )
+          else ...[
+            if (unlimited != null)
+              Text(
+                'Unlimited: ${_formatRemainingDuration(unlimited.expiresAt!)}',
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  height: 1.2,
+                ),
+              ),
+            if (limited != null)
+              Padding(
+                padding: EdgeInsets.only(top: unlimited != null ? 6.0 : 0.0),
+                child: Text(
+                  'Tokens: ${limited.tokensRemaining}',
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    height: 1.2,
+                  ),
+                ),
+              ),
+          ],
+          const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.attach_money,
-                    color: Colors.white, size: 16),
+                Icon(
+                  hasAny ? Icons.check_circle : Icons.info_outline,
+                  color: Colors.white,
+                  size: 16,
+                ),
                 const SizedBox(width: 4),
                 Text(
-                  'KES ${Formatters.formatCurrency(kesBalance)} available',
+                  hasAny ? 'Active' : 'Subscribe to get started',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 13,
@@ -168,20 +204,53 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
   }
 
-  // ── Token stats row ─────────────────────────────────────────────────────────
-  Widget _buildTokenStatsRow(WalletState state) {
-    final lifetime = state.balance?.lifetimeTokens ?? 0;
-    final consumed = state.balance?.tokensConsumed ?? 0;
-    final pending = state.balance?.pendingBalance ?? 0.0;
+  SubscriptionPlan? _firstUnlimited(List<SubscriptionPlan> plans) {
+    for (final p in plans) {
+      if (p.type == SubscriptionType.unlimited &&
+          p.isActive &&
+          p.expiresAt != null &&
+          p.expiresAt!.isAfter(DateTime.now())) {
+        return p;
+      }
+    }
+    return null;
+  }
 
+  SubscriptionPlan? _firstLimited(List<SubscriptionPlan> plans) {
+    for (final p in plans) {
+      if (p.type == SubscriptionType.limited &&
+          p.isActive &&
+          (p.tokensRemaining ?? 0) > 0) {
+        return p;
+      }
+    }
+    return null;
+  }
+
+  String _formatRemainingDuration(DateTime expiresAt) {
+    final remaining = expiresAt.difference(DateTime.now());
+    if (remaining.isNegative) return 'expired';
+    final days = remaining.inDays;
+    final hours = remaining.inHours.remainder(24);
+    final minutes = remaining.inMinutes.remainder(60);
+    if (days >= 1) return '${days}d ${hours}h';
+    if (hours >= 1) return '${hours}h ${minutes}m';
+    if (minutes >= 1) return '${minutes}m';
+    return '<1m';
+  }
+
+  // ── Lifetime stats row — 2 cards (pending dropped from old 3-card layout) ──
+  Widget _buildLifetimeStatsRow(WalletState state) {
+    final purchased = state.balance?.wallet?.lifetimeTokensPurchased ?? 0;
+    final consumed = state.balance?.wallet?.lifetimeTokensConsumed ?? 0;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
           Expanded(
             child: _buildStatCard(
-              label: 'Lifetime',
-              value: '$lifetime',
+              label: 'Lifetime Purchased',
+              value: '$purchased',
               icon: Icons.all_inclusive,
               color: Colors.blue,
             ),
@@ -189,19 +258,10 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           const SizedBox(width: 10),
           Expanded(
             child: _buildStatCard(
-              label: 'Consumed',
+              label: 'Lifetime Consumed',
               value: '$consumed',
               icon: Icons.flash_on,
               color: Colors.orange,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _buildStatCard(
-              label: 'Pending',
-              value: Formatters.formatCurrency(pending),
-              icon: Icons.hourglass_empty,
-              color: Colors.purple,
             ),
           ),
         ],
@@ -222,7 +282,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.08),
+            color: Colors.grey.withValues(alpha: 0.08),
             blurRadius: 6,
             spreadRadius: 1,
           ),
@@ -243,13 +303,14 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           Text(
             label,
             style: const TextStyle(fontSize: 11, color: Colors.grey),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
-  // ── Quick actions ───────────────────────────────────────────────────────────
+  // ── Quick actions ──────────────────────────────────────────────────────────
   Widget _buildQuickActions() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -258,7 +319,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           Expanded(
             child: _buildActionTile(
               icon: Icons.add_circle_outline,
-              label: 'Buy Tokens',
+              label: 'Subscribe',
               color: const Color(0xFF00C853),
               onTap: () => context.push('/top-up'),
             ),
@@ -289,9 +350,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.2)),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
         ),
         child: Column(
           children: [
@@ -311,15 +372,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
   }
 
-  // ── Token packages teaser ───────────────────────────────────────────────────
-  Widget _buildTokenPackagesTeaser() {
-    final packages = [
-      {'label': '50 tokens', 'price': 'KES 20', 'tag': 'Trial'},
-      {'label': '500 tokens', 'price': 'KES 150', 'tag': 'Starter'},
-      {'label': '2,500 tokens', 'price': 'KES 500', 'tag': 'Business'},
-      {'label': '10,000 tokens', 'price': 'KES 1,500', 'tag': 'Bulk'},
-    ];
-
+  // ── Packages teaser (Q7 — fed from state.packages) ─────────────────────────
+  Widget _buildPackagesTeaser(WalletState state) {
+    final packages = state.packages;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -329,102 +384,126 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'Token Packages',
-                style:
-                    TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                'Subscription Plans',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
               TextButton(
                 onPressed: () => context.push('/top-up'),
                 child: const Text(
-                  'Buy Now',
+                  'Subscribe',
                   style: TextStyle(color: Color(0xFF00C853)),
                 ),
               ),
             ],
           ),
         ),
-        SizedBox(
-          height: 110,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
+        if (packages.isEmpty)
+          Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: packages.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (context, i) {
-              final pkg = packages[i];
-              return InkWell(
-                onTap: () => context.push('/top-up'),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 30),
+              decoration: BoxDecoration(
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: 130,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade200),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.07),
-                        blurRadius: 6,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF00C853).withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Center(
+                child: Text(
+                  'Loading plans...',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+            ),
+          )
+        else
+          SizedBox(
+            height: 130,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: packages.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, i) {
+                final pkg = packages[i];
+                return InkWell(
+                  onTap: () => context.push('/top-up'),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: 150,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withValues(alpha: 0.07),
+                          blurRadius: 6,
                         ),
-                        child: Text(
-                          pkg['tag']!,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: Color(0xFF00C853),
-                            fontWeight: FontWeight.bold,
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF00C853)
+                                .withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            pkg.type == SubscriptionType.unlimited
+                                ? 'UNLIMITED'
+                                : 'TOKENS',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Color(0xFF00C853),
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        pkg['label']!,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
+                        const SizedBox(height: 6),
+                        Text(
+                          pkg.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        pkg['price']!,
-                        style: const TextStyle(
-                          color: Color(0xFF00C853),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                        const Spacer(),
+                        Text(
+                          'KES ${pkg.price}',
+                          style: const TextStyle(
+                            color: Color(0xFF00C853),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
-        ),
       ],
     );
   }
 
-  // ── Transactions ────────────────────────────────────────────────────────────
-  Widget _buildTransactionsHeader() {
+  // ── Purchases list (renamed from Token History) ────────────────────────────
+  Widget _buildPurchasesHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           const Text(
-            'Token History',
+            'Purchase History',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
           ),
           TextButton(
@@ -439,17 +518,15 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
   }
 
-  Widget _buildTransactionsList(WalletState state) {
-    final transactions = state.transactions ?? [];
-
-    if (state.isLoading && transactions.isEmpty) {
+  Widget _buildPurchasesList(WalletState state) {
+    final purchases = state.purchases ?? const <SubscriptionPurchase>[];
+    if (state.isLoading && purchases.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(40),
         child: Center(child: CircularProgressIndicator()),
       );
     }
-
-    if (transactions.isEmpty) {
+    if (purchases.isEmpty) {
       return Container(
         margin: const EdgeInsets.symmetric(horizontal: 16),
         padding: const EdgeInsets.symmetric(vertical: 40),
@@ -459,17 +536,20 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         ),
         child: Column(
           children: [
-            Icon(Icons.token, size: 56, color: Colors.grey.shade300),
+            Icon(Icons.card_membership, size: 56, color: Colors.grey.shade300),
             const SizedBox(height: 12),
             const Text(
-              'No token purchases yet',
+              'No purchases yet',
               style: TextStyle(
-                  color: Colors.grey, fontWeight: FontWeight.w500),
+                color: Colors.grey,
+                fontWeight: FontWeight.w500,
+              ),
             ),
             const SizedBox(height: 6),
             const Text(
-              'Buy tokens to start processing transactions',
+              'Subscribe to a plan to start processing transactions',
               style: TextStyle(color: Colors.grey, fontSize: 12),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
             ElevatedButton(
@@ -477,67 +557,49 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF00C853),
               ),
-              child: const Text('Buy Your First Tokens'),
+              child: const Text('Subscribe Now'),
             ),
           ],
         ),
       );
     }
-
     return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      itemCount: transactions.length + (state.hasMore ? 1 : 0),
+      itemCount: purchases.length + (state.hasMore ? 1 : 0),
       itemBuilder: (context, index) {
-        if (index == transactions.length) {
+        if (index == purchases.length) {
           return const Padding(
             padding: EdgeInsets.all(16),
             child: Center(child: CircularProgressIndicator()),
           );
         }
-        return _buildTransactionItem(transactions[index]);
+        return _buildPurchaseItem(purchases[index], state);
       },
     );
   }
 
-  Widget _buildTransactionItem(WalletTransaction transaction) {
-    final isPurchase =
-        transaction.type == WalletTransactionType.purchase;
-    final isSuccess =
-        transaction.status == WalletTransactionStatus.success;
-    final isPending =
-        transaction.status == WalletTransactionStatus.pending;
-
-    final color = isSuccess
-        ? Colors.green
-        : isPending
-            ? Colors.orange
-            : Colors.red;
-
-    final icon = isPurchase
-        ? Icons.add_circle
-        : transaction.type == WalletTransactionType.deduction
-            ? Icons.remove_circle
-            : Icons.swap_horiz;
-
+  Widget _buildPurchaseItem(SubscriptionPurchase purchase, WalletState state) {
+    final color = _statusColor(purchase.status);
+    final pkgName =
+        ref.read(walletNotifierProvider.notifier).findPackageById(purchase.packageId)?.name ??
+            'Subscription';
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       elevation: 1,
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: color.withOpacity(0.12),
-          child: Icon(icon, color: color, size: 20),
+          backgroundColor: color.withValues(alpha: 0.12),
+          child: Icon(Icons.add_circle, color: color, size: 20),
         ),
         title: Text(
-          transaction.type.name.toUpperCase().replaceAll('_', ' '),
-          style: const TextStyle(
-              fontWeight: FontWeight.w600, fontSize: 14),
+          pkgName,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
         ),
         subtitle: Text(
-          DateFormat('dd MMM yyyy, HH:mm').format(transaction.timestamp),
+          DateFormat('dd MMM yyyy, HH:mm').format(purchase.createdAt),
           style: const TextStyle(fontSize: 12),
         ),
         trailing: Column(
@@ -545,7 +607,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              '${isPurchase ? '+' : ''}${transaction.amount.toStringAsFixed(0)} tokens',
+              'KES ${purchase.amountPaid}',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: color,
@@ -553,21 +615,39 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               ),
             ),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6,
+                vertical: 2,
+              ),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
+                color: color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                transaction.status.name.toUpperCase(),
+                purchase.status.name.toUpperCase(),
                 style: TextStyle(
-                    fontSize: 9, color: color, fontWeight: FontWeight.bold),
+                  fontSize: 9,
+                  color: color,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Color _statusColor(SubscriptionPurchaseStatus status) {
+    switch (status) {
+      case SubscriptionPurchaseStatus.completed:
+        return Colors.green;
+      case SubscriptionPurchaseStatus.pending:
+        return Colors.orange;
+      case SubscriptionPurchaseStatus.failed:
+        return Colors.red;
+      case SubscriptionPurchaseStatus.reversed:
+        return Colors.grey;
+    }
   }
 }

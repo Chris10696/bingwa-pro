@@ -1,176 +1,127 @@
 // lib/shared/models/wallet_model.dart
+// W1: dramatically restructured.
+//   - WalletBalance reshaped to match new /wallet/balance composite payload.
+//   - WalletTransaction renamed to SubscriptionPurchase (Q5 lock).
+//   - WalletTransactionType/Status enums replaced by SubscriptionPurchaseStatus
+//     (purchase-only audit per primer locked decision 3).
+//   - Dropped: TokenPurchaseRequest, TransferRequest, WithdrawalRequest,
+//     MpesaPaymentRequest, WalletSummary, AirtimePaymentRequest, PaymentMethod
+//     (their endpoints/methods are deleted in W1).
+//   - Added: SubscriptionPurchaseRequest for /wallet/purchase-subscription.
+//   - Kept: PaymentConfirmation (confirmPayment flow retained).
 import 'package:freezed_annotation/freezed_annotation.dart';
+import 'subscription_plan_model.dart';
 
 part 'wallet_model.freezed.dart';
 part 'wallet_model.g.dart';
 
-// Wallet Transaction Types
-enum WalletTransactionType {
-  @JsonValue('PURCHASE')
-  purchase,
-  @JsonValue('DEDUCTION')
-  deduction,
-  @JsonValue('REFUND')
-  refund,
-  @JsonValue('COMMISSION')
-  commission,
-  @JsonValue('ADJUSTMENT')
-  adjustment,
-  @JsonValue('BONUS')
-  bonus,
-  @JsonValue('TRANSFER')
-  transfer,
-  @JsonValue('WITHDRAWAL')
-  withdrawal,
-}
-
-// Wallet Transaction Status
-enum WalletTransactionStatus {
+// Status for SubscriptionPurchase audit rows (matches backend enum exactly).
+enum SubscriptionPurchaseStatus {
   @JsonValue('PENDING')
   pending,
-  @JsonValue('SUCCESS')
-  success,
+  @JsonValue('COMPLETED')
+  completed,
   @JsonValue('FAILED')
   failed,
-  @JsonValue('CANCELLED')
-  cancelled,
   @JsonValue('REVERSED')
   reversed,
 }
 
-// Wallet Transaction
-@freezed
-abstract class WalletTransaction with _$WalletTransaction {
-  const factory WalletTransaction({
-    required String id,
-    required String agentId,
-    required WalletTransactionType type,
-    required double amount,
-    required double balanceBefore,
-    required double balanceAfter,
-    required WalletTransactionStatus status,
-    required DateTime timestamp,
-    required String reference,
-    String? description,
-    String? paymentMethod,
-    String? paymentReference,
-    String? transactionId,
-    String? reversedTransactionId,
-    String? initiatedBy,
-    String? approvedBy,
-    DateTime? approvedAt,
-    String? recipientAgentId,
-    String? recipientPhone,
-    Map<String, dynamic>? metadata,
-  }) = _WalletTransaction;
-
-  factory WalletTransaction.fromJson(Map<String, dynamic> json) =>
-      _$WalletTransactionFromJson(json);
+// Processing mode for the wallet's processing state.
+enum ProcessingMode {
+  @JsonValue('express')
+  express,
+  @JsonValue('advanced')
+  advanced,
 }
 
-// Wallet Balance - UPDATED with token fields
+// SubscriptionPurchase: purchase-only audit row (Q5 rename from
+// WalletTransaction). Matches backend src/subscriptions/entities/subscription-purchase.entity.ts.
+@freezed
+abstract class SubscriptionPurchase with _$SubscriptionPurchase {
+  const factory SubscriptionPurchase({
+    required String id,
+    required String agentId,
+    required String packageId,
+    required int amountPaid,
+    required String paymentReference,
+    required SubscriptionPurchaseStatus status,
+    required DateTime createdAt,
+    Map<String, dynamic>? metadata,
+  }) = _SubscriptionPurchase;
+
+  factory SubscriptionPurchase.fromJson(Map<String, dynamic> json) =>
+      _$SubscriptionPurchaseFromJson(json);
+}
+
+// Composite wallet-state payload returned by GET /wallet/balance.
+// Shape per primer:
+//   { hasUsableTokens, plans, wallet: {processingMode, isProcessing,
+//     lifetimeTokensPurchased, lifetimeTokensConsumed} }
+//
+// The nested `wallet` object is represented by WalletProcessingState below.
 @freezed
 abstract class WalletBalance with _$WalletBalance {
   const factory WalletBalance({
-    @Default('') String agentId,
-    @Default(0.0) double availableBalance,
-    @Default(0.0) double pendingBalance,
-    @Default(0.0) double totalBalance,
-    @Default(0.0) double lockedBalance,
-    DateTime? lastUpdated,
-    @Default(0.0) double totalDeposits,
-    @Default(0.0) double totalWithdrawals,
-    @Default(0.0) double totalCommission,
-    @Default(0.0) double totalBonuses,
-    @Default(0) int tokenBalanceInt,
-    @Default(0) int lifetimeTokens,
-    @Default(0) int tokensConsumed,
-    // ====================================
-    
+    @Default(false) bool hasUsableTokens,
+    @Default([]) List<SubscriptionPlan> plans,
+    WalletProcessingState? wallet,
   }) = _WalletBalance;
 
-  factory WalletBalance.fromJson(Map<String, dynamic> json) =>
-      _$WalletBalanceFromJson(json);
+  factory WalletBalance.fromJson(Map<String, dynamic> json) {
+    // Manual conversion: plans use the plain-Dart SubscriptionPlan model
+    // (no fromJson freezed bridge), so the generated _$ factory can't deserialize
+    // the list directly. Hand-roll the read.
+    final plansRaw = json['plans'] as List<dynamic>? ?? const [];
+    return WalletBalance(
+      hasUsableTokens: json['hasUsableTokens'] as bool? ?? false,
+      plans: plansRaw
+          .map((e) => SubscriptionPlan.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      wallet: json['wallet'] == null
+          ? null
+          : WalletProcessingState.fromJson(
+              json['wallet'] as Map<String, dynamic>),
+    );
+  }
 }
 
-// Token Purchase Request
+// Inner wallet processing state. Matches the simplified Wallet entity fields
+// exposed by /wallet/balance.
 @freezed
-abstract class TokenPurchaseRequest with _$TokenPurchaseRequest {
-  const factory TokenPurchaseRequest({
-    required String agentId,
-    required double amount,
-    required String paymentMethod,
-    String? tillNumber,
-    String? paybillNumber,
-    String? accountNumber,
+abstract class WalletProcessingState with _$WalletProcessingState {
+  const factory WalletProcessingState({
+    @Default(ProcessingMode.express) ProcessingMode processingMode,
+    @Default(false) bool isProcessing,
+    @Default(0) int lifetimeTokensPurchased,
+    @Default(0) int lifetimeTokensConsumed,
+  }) = _WalletProcessingState;
+
+  factory WalletProcessingState.fromJson(Map<String, dynamic> json) =>
+      _$WalletProcessingStateFromJson(json);
+}
+
+// Request body for POST /wallet/purchase-subscription.
+// Phone is optional; backend uses agent's registered number if omitted (Q8).
+@freezed
+abstract class SubscriptionPurchaseRequest with _$SubscriptionPurchaseRequest {
+  const factory SubscriptionPurchaseRequest({
+    required String packageId,
     String? phoneNumber,
-    required String deviceId,
-  }) = _TokenPurchaseRequest;
+  }) = _SubscriptionPurchaseRequest;
 
-  factory TokenPurchaseRequest.fromJson(Map<String, dynamic> json) =>
-      _$TokenPurchaseRequestFromJson(json);
+  factory SubscriptionPurchaseRequest.fromJson(Map<String, dynamic> json) =>
+      _$SubscriptionPurchaseRequestFromJson(json);
 }
 
-// Transfer Request
-@freezed
-abstract class TransferRequest with _$TransferRequest {
-  const factory TransferRequest({
-    required String fromAgentId,
-    required String toAgentId,
-    required double amount,
-    required String description,
-    required String deviceId,
-    String? reference,
-  }) = _TransferRequest;
-
-  factory TransferRequest.fromJson(Map<String, dynamic> json) =>
-      _$TransferRequestFromJson(json);
-}
-
-// Withdrawal Request
-@freezed
-abstract class WithdrawalRequest with _$WithdrawalRequest {
-  const factory WithdrawalRequest({
-    required String agentId,
-    required double amount,
-    required String phoneNumber,
-    required String paymentMethod,
-    required String deviceId,
-    String? tillNumber,
-    String? paybillNumber,
-    String? accountNumber,
-    String? description,
-    String? reference,
-  }) = _WithdrawalRequest;
-
-  factory WithdrawalRequest.fromJson(Map<String, dynamic> json) =>
-      _$WithdrawalRequestFromJson(json);
-}
-
-// M-Pesa Payment Request
-@freezed
-abstract class MpesaPaymentRequest with _$MpesaPaymentRequest {
-  const factory MpesaPaymentRequest({
-    required String phoneNumber,
-    required double amount,
-    required String reference,
-    required String description,
-    @Default('CustomerPayBillOnline') String commandId,
-    String? callBackURL,
-  }) = _MpesaPaymentRequest;
-
-  factory MpesaPaymentRequest.fromJson(Map<String, dynamic> json) =>
-      _$MpesaPaymentRequestFromJson(json);
-}
-
-// Payment Confirmation
+// Payment confirmation response (kept; used by confirmPayment flow).
 @freezed
 abstract class PaymentConfirmation with _$PaymentConfirmation {
   const factory PaymentConfirmation({
-    required String transactionId,
-    required String reference,
-    required String status,
-    required DateTime timestamp,
+    @Default('') String transactionId,
+    @Default('') String reference,
+    @Default('PENDING') String status,
+    DateTime? timestamp,
     String? mpesaReceipt,
     String? resultCode,
     String? resultDesc,
@@ -181,60 +132,4 @@ abstract class PaymentConfirmation with _$PaymentConfirmation {
 
   factory PaymentConfirmation.fromJson(Map<String, dynamic> json) =>
       _$PaymentConfirmationFromJson(json);
-}
-
-// Wallet Summary
-@freezed
-abstract class WalletSummary with _$WalletSummary {
-  const factory WalletSummary({
-    required WalletBalance balance,
-    required List<WalletTransaction> recentTransactions,
-    @Default(0.0) double dailySpent,
-    @Default(0.0) double weeklySpent,
-    @Default(0.0) double monthlySpent,
-    @Default(0) int transactionCountToday,
-    DateTime? lastPurchaseDate,
-    double? lastPurchaseAmount,
-  }) = _WalletSummary;
-
-  factory WalletSummary.fromJson(Map<String, dynamic> json) =>
-      _$WalletSummaryFromJson(json);
-}
-
-// Airtime Payment Request
-@freezed
-abstract class AirtimePaymentRequest with _$AirtimePaymentRequest {
-  const factory AirtimePaymentRequest({
-    required String agentId,
-    required double amount,
-    required String phoneNumber,
-    required String reference,
-    required String deviceId,
-  }) = _AirtimePaymentRequest;
-
-  factory AirtimePaymentRequest.fromJson(Map<String, dynamic> json) =>
-      _$AirtimePaymentRequestFromJson(json);
-}
-
-// Payment Methods
-@freezed
-abstract class PaymentMethod with _$PaymentMethod {
-  const factory PaymentMethod({
-    required String id,
-    required String name,
-    required String type,
-    required String displayName,
-    required String description,
-    @Default(true) bool isActive,
-    double? minAmount,
-    double? maxAmount,
-    String? accountNumber,
-    String? tillNumber,
-    String? paybillNumber,
-    String? instructions,
-    Map<String, dynamic>? metadata,
-  }) = _PaymentMethod;
-
-  factory PaymentMethod.fromJson(Map<String, dynamic> json) =>
-      _$PaymentMethodFromJson(json);
 }

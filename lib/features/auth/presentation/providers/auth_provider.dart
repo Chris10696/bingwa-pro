@@ -546,6 +546,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
   
   // ===== NEW METHOD: Update Payment Settings (MOVED INSIDE CLASS) =====
+  // W1: wallet_repository.updatePaymentSettings was deleted per primer (Q9
+  // wallet strip). For W1 this method does a local-only state update so the
+  // till_registration_screen UI still works — but the till/paybill numbers
+  // are NOT persisted to backend until W2 wires this through agent_repository
+  // or a dedicated settings endpoint.
+  //
+  // TODO(wave-2): persist payment settings via agentRepository.updateAgentSettings
+  //   (or a new dedicated /agents/payment-settings endpoint). For W1 the
+  //   processing_provider's auto-payment loop is stubbed anyway, so till/paybill
+  //   not persisting is a no-op functional regression — matches the primer's
+  //   "Temporary regression accepted" rule.
   Future<void> updatePaymentSettings({
     required String? tillNumber,
     required String? paybillNumber,
@@ -554,29 +565,26 @@ class AuthNotifier extends StateNotifier<AuthState> {
     required bool autoDetect,
   }) async {
     if (state.status.isInProgress) return;
-    
+
     state = state.copyWith(
       status: FormzSubmissionStatus.inProgress,
       isLoading: true,
       errorMessage: null,
     );
-    
+
     try {
       final agent = state.agent;
       if (agent == null) throw Exception('Not authenticated');
-      
-      // Call repository
-      final walletRepo = _ref.read(walletRepositoryProvider);
-      await walletRepo.updatePaymentSettings(
-        agentId: agent.id,
-        tillNumber: tillNumber,
-        paybillNumber: paybillNumber,
-        paybillAccount: paybillAccount,
-        method: method,
-        autoDetect: autoDetect,
+
+      // W1: backend persistence stubbed. The call below was previously
+      // walletRepo.updatePaymentSettings(...) — that method was deleted per
+      // primer. See TODO(wave-2) above.
+      AppLogger.d(
+        '[W1-STUB] updatePaymentSettings — backend persistence deferred to W2. '
+        'method=$method tillNumber=$tillNumber paybillNumber=$paybillNumber',
       );
-      
-      // Update local agent state
+
+      // Update local agent state so the UI reflects the change immediately.
       final updatedAgent = agent.copyWith(
         tillNumber: tillNumber,
         paybillNumber: paybillNumber,
@@ -585,18 +593,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
         paymentSettings: {'autoDetect': autoDetect},
         tillNumberStatus: 'pending',
       );
-      
+
       state = state.copyWith(
         status: FormzSubmissionStatus.success,
         agent: updatedAgent,
         isLoading: false,
       );
-      
+
       AppLogger.logSessionEvent(
-        event: 'Payment settings updated',
+        event: 'Payment settings updated (W1-STUB, local only)',
         details: 'Method: $method',
       );
-      
     } catch (e) {
       AppLogger.e('Failed to update payment settings:', e);
       state = state.copyWith(

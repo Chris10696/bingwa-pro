@@ -1,7 +1,11 @@
 // lib/app_router.dart
-
+// W1 edits:
+//   - Dropped imports of airtime_screen, data_screen, sms_screen
+//   - Removed AppRoutes.airtime, AppRoutes.data, AppRoutes.sms constants
+//   - Removed /airtime, /data, /sms GoRoute blocks
+//   - Removed goToAirtime, goToData, goToSMS extension methods
+// Every surviving route still resolves to a present screen.
 import 'package:bingwa_pro/core/security/secure_storage_manager.dart';
-import 'package:bingwa_pro/core/utils/session_state_provider.dart';
 import 'package:bingwa_pro/features/auth/presentation/screens/biometric_setup_screen.dart';
 import 'package:bingwa_pro/features/auth/presentation/screens/forgot_pin_screen.dart';
 import 'package:bingwa_pro/features/auth/presentation/screens/login_screen.dart';
@@ -9,9 +13,6 @@ import 'package:bingwa_pro/features/auth/presentation/screens/register_screen.da
 import 'package:bingwa_pro/features/auth/presentation/screens/verify_phone_screen.dart';
 import 'package:bingwa_pro/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:bingwa_pro/features/settings/presentation/screens/settings_screen.dart';
-import 'package:bingwa_pro/features/transactions/presentation/screens/airtime_screen.dart';
-import 'package:bingwa_pro/features/transactions/presentation/screens/data_screen.dart';
-import 'package:bingwa_pro/features/transactions/presentation/screens/sms_screen.dart';
 import 'package:bingwa_pro/features/transactions/presentation/screens/transaction_history_screen.dart';
 import 'package:bingwa_pro/features/wallet/presentation/screens/topup_screen.dart';
 import 'package:bingwa_pro/features/wallet/presentation/screens/wallet_screen.dart';
@@ -26,7 +27,6 @@ import 'package:bingwa_pro/features/auto_reply/presentation/screens/auto_reply_s
 import 'package:bingwa_pro/features/customers/presentation/screens/customer_detail_screen.dart';
 import 'package:bingwa_pro/features/settings/presentation/screens/edit_profile_screen.dart';
 import 'package:bingwa_pro/features/settings/presentation/screens/till_registration_screen.dart';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -38,51 +38,36 @@ import 'core/auth/auth_state_provider.dart';
 
 class AppRoutes {
   static const String walletTopUp = '/wallet/topup';
-
   // Auth routes
   static const String login = '/login';
   static const String register = '/register';
   static const String verifyPhone = '/verify-phone';
   static const String forgotPin = '/forgot-pin';
   static const String biometricSetup = '/biometric-setup';
-
   // Main app routes
   static const String dashboard = '/dashboard';
   static const String wallet = '/wallet';
   static const String topUp = '/top-up';
-  static const String airtime = '/airtime';
-  static const String data = '/data';
-  static const String sms = '/sms';
+  // W1: airtime, data, sms route constants removed (screens deleted)
   static const String transactionHistory = '/transaction-history';
   static const String settings = '/settings';
   static const String profile = '/profile';
-
   // Feature routes
   static const String offers = '/offers';
   static const String customers = '/customers';
   static const String reports = '/reports';
   static const String help = '/help';
-
-  // Customer detail route
   static const String customerDetail = '/customers/:id';
-
-  // New feature routes
   static const String quickDial = '/quick-dial';
   static const String autoRenewals = '/auto-renewals';
   static const String siteLink = '/sitelink';
   static const String autoReply = '/auto-reply';
-
   // Settings sub-routes
   static const String editProfile = '/settings/profile';
   static const String paymentSettings = '/settings/payment';
-
   // Root
   static const String root = '/';
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Page transition helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 class AppTransitions {
   static Widget fadeTransition(
@@ -129,54 +114,22 @@ class AppTransitions {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SecureStorageManager provider (unchanged)
-// ─────────────────────────────────────────────────────────────────────────────
-
 final secureStorageManagerProvider = Provider<SecureStorageManager>((ref) {
   return SecureStorageManager();
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Router provider — REPLACED with synchronous auth-watching version
-//
-// Key changes from the old implementation:
-//   1. Watches authStateProvider (a ChangeNotifier) instead of reading the
-//      async sessionStateProvider.  The router automatically re-evaluates
-//      redirect() every time authStateProvider notifies its listeners — which
-//      happens on login, logout, and token expiry.
-//   2. redirect() is now fully synchronous — no async / await / I/O inside.
-//      This eliminates the race condition that caused the old router to briefly
-//      land on /login even when a valid session existed.
-//   3. initialLocation is resolved from the current auth state so the very
-//      first frame already shows the correct screen with no flicker.
-//   4. refreshListenable: authState wires GoRouter into the ChangeNotifier so
-//      navigation re-runs automatically when auth state mutates.
-// ─────────────────────────────────────────────────────────────────────────────
-
 final appRouterProvider = Provider<GoRouter>((ref) {
-  // Watch the auth-state notifier — this is what makes the router re-evaluate
-  // when auth state changes (login, logout, token expiry).
   final authState = ref.watch(authStateProvider);
-
-  // Initial location depends on auth state at app start.  If the user was
-  // already logged in when they killed the app, they land on /dashboard
-  // immediately — no flicker through /login.
   final initialLocation =
       authState.isAuthenticated ? AppRoutes.dashboard : AppRoutes.login;
 
   return GoRouter(
     initialLocation: initialLocation,
     debugLogDiagnostics: false,
-
-    // Critical: re-runs redirect on every authState change notification.
     refreshListenable: authState,
-
-    // Synchronous now — no await, no async I/O, no race conditions.
     redirect: (context, state) {
       final isAuthenticated = authState.isAuthenticated;
       final location = state.uri.toString();
-
       const publicRoutes = [
         AppRoutes.login,
         AppRoutes.register,
@@ -184,34 +137,24 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         AppRoutes.forgotPin,
         AppRoutes.biometricSetup,
       ];
-
       final isOnPublicRoute = publicRoutes.contains(location);
 
-      // Unauthenticated user trying to access a protected route → /login
       if (!isAuthenticated && !isOnPublicRoute) {
         return AppRoutes.login;
       }
-
-      // Authenticated user on a public route → /dashboard
-      // (this was missing entirely before — the bug that kept agents on /login
-      // even after a successful login when they had a persisted session)
       if (isAuthenticated && isOnPublicRoute) {
         return AppRoutes.dashboard;
       }
-
-      // Root path → resolve to the right destination
       if (location == AppRoutes.root) {
         return isAuthenticated ? AppRoutes.dashboard : AppRoutes.login;
       }
-
-      return null; // no redirect needed
+      return null;
     },
 
     routes: [
       // ======================================================================
       // AUTH ROUTES
       // ======================================================================
-
       GoRoute(
         path: AppRoutes.login,
         name: 'login',
@@ -222,7 +165,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 300),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.register,
         name: 'register',
@@ -233,7 +175,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 400),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.verifyPhone,
         name: 'verifyPhone',
@@ -248,7 +189,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           );
         },
       ),
-
       GoRoute(
         path: AppRoutes.forgotPin,
         name: 'forgotPin',
@@ -259,7 +199,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 300),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.biometricSetup,
         name: 'biometricSetup',
@@ -274,19 +213,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // ======================================================================
       // MAIN APP ROUTES
       // ======================================================================
-
       GoRoute(
         path: AppRoutes.dashboard,
         name: 'dashboard',
         pageBuilder: (context, state) => CustomTransitionPage<void>(
           key: state.pageKey,
           child: const DashboardScreen(),
-          // Dashboard uses no animation — feels instant, like a home screen
           transitionsBuilder:
               (context, animation, secondaryAnimation, child) => child,
         ),
       ),
-
       GoRoute(
         path: AppRoutes.wallet,
         name: 'wallet',
@@ -297,7 +233,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.topUp,
         name: 'topUp',
@@ -308,8 +243,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
-      // Alias route — /wallet/topup delegates to the same TopUpScreen
       GoRoute(
         path: AppRoutes.walletTopUp,
         name: 'walletTopUp',
@@ -323,41 +256,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // ======================================================================
       // TRANSACTION ROUTES
+      // W1: /airtime, /data, /sms routes removed (screens deleted)
       // ======================================================================
-
-      GoRoute(
-        path: AppRoutes.airtime,
-        name: 'airtime',
-        pageBuilder: (context, state) => CustomTransitionPage<void>(
-          key: state.pageKey,
-          child: const AirtimeScreen(),
-          transitionsBuilder: AppTransitions.slideTransition,
-          transitionDuration: const Duration(milliseconds: 350),
-        ),
-      ),
-
-      GoRoute(
-        path: AppRoutes.data,
-        name: 'data',
-        pageBuilder: (context, state) => CustomTransitionPage<void>(
-          key: state.pageKey,
-          child: const DataScreen(),
-          transitionsBuilder: AppTransitions.slideTransition,
-          transitionDuration: const Duration(milliseconds: 350),
-        ),
-      ),
-
-      GoRoute(
-        path: AppRoutes.sms,
-        name: 'sms',
-        pageBuilder: (context, state) => CustomTransitionPage<void>(
-          key: state.pageKey,
-          child: const SMSScreen(),
-          transitionsBuilder: AppTransitions.slideTransition,
-          transitionDuration: const Duration(milliseconds: 350),
-        ),
-      ),
-
       GoRoute(
         path: AppRoutes.transactionHistory,
         name: 'transactionHistory',
@@ -372,7 +272,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // ======================================================================
       // OFFERS, CUSTOMERS, REPORTS, HELP
       // ======================================================================
-
       GoRoute(
         path: AppRoutes.offers,
         name: 'offers',
@@ -383,7 +282,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.customers,
         name: 'customers',
@@ -394,7 +292,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.customerDetail,
         name: 'customerDetail',
@@ -408,7 +305,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           );
         },
       ),
-
       GoRoute(
         path: AppRoutes.reports,
         name: 'reports',
@@ -419,7 +315,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.help,
         name: 'help',
@@ -432,9 +327,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
 
       // ======================================================================
-      // NEW FEATURE ROUTES
+      // FEATURE ROUTES
       // ======================================================================
-
       GoRoute(
         path: AppRoutes.quickDial,
         name: 'quickDial',
@@ -445,7 +339,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.autoRenewals,
         name: 'autoRenewals',
@@ -456,7 +349,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.siteLink,
         name: 'siteLink',
@@ -467,7 +359,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.autoReply,
         name: 'autoReply',
@@ -482,7 +373,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // ======================================================================
       // SETTINGS AND PROFILE
       // ======================================================================
-
       GoRoute(
         path: AppRoutes.settings,
         name: 'settings',
@@ -493,8 +383,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
-      // /profile and /settings/profile both resolve to EditProfileScreen
       GoRoute(
         path: AppRoutes.profile,
         name: 'profile',
@@ -505,7 +393,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
       GoRoute(
         path: AppRoutes.editProfile,
         name: 'editProfile',
@@ -516,8 +403,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-
-      // Payment settings (till / paybill registration)
       GoRoute(
         path: AppRoutes.paymentSettings,
         name: 'paymentSettings',
@@ -529,10 +414,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
     ],
-
-    // ========================================================================
-    // Error page (unchanged)
-    // ========================================================================
 
     errorBuilder: (context, state) {
       return Scaffold(
@@ -571,36 +452,25 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Convenience extension on BuildContext (unchanged)
+// Convenience extension on BuildContext
+// W1: goToAirtime, goToData, goToSMS methods removed (routes deleted).
 // ─────────────────────────────────────────────────────────────────────────────
 
 extension GoRouterExtension on BuildContext {
-  // Auth navigation
   void goToLogin() => go(AppRoutes.login);
   void goToRegister() => go(AppRoutes.register);
   void goToVerifyPhone({String? phone, String? token}) =>
       go('${AppRoutes.verifyPhone}?phone=${phone ?? ''}&token=${token ?? ''}');
   void goToForgotPin() => go(AppRoutes.forgotPin);
   void goToBiometricSetup() => go(AppRoutes.biometricSetup);
-
-  // Main app navigation
   void goToDashboard() => go(AppRoutes.dashboard);
   void goToWallet() => go(AppRoutes.wallet);
   void goToTopUp() => go(AppRoutes.topUp);
-  void goToAirtime() => go(AppRoutes.airtime);
-  void goToData() => go(AppRoutes.data);
-  void goToSMS() => go(AppRoutes.sms);
   void goToTransactionHistory() => go(AppRoutes.transactionHistory);
   void goToSettings() => go(AppRoutes.settings);
-
-  // Profile navigation — both paths resolve to EditProfileScreen
   void goToProfile() => go(AppRoutes.profile);
   void goToEditProfile() => go(AppRoutes.editProfile);
-
-  // Payment settings navigation
   void goToPaymentSettings() => go(AppRoutes.paymentSettings);
-
-  // Other screens
   void goToOffers() => go(AppRoutes.offers);
   void goToCustomers() => go(AppRoutes.customers);
   void goToCustomerDetails(String customerId) => go('/customers/$customerId');
@@ -610,18 +480,11 @@ extension GoRouterExtension on BuildContext {
   void goToAutoRenewals() => go(AppRoutes.autoRenewals);
   void goToSiteLink() => go(AppRoutes.siteLink);
   void goToAutoReply() => go(AppRoutes.autoReply);
-
-  // Replace navigation
   void replaceWithDashboard() => go(AppRoutes.dashboard);
   void replaceWithLogin() => go(AppRoutes.login);
-
   void goToTransactionDetails(String transactionId) =>
       go('/transaction/$transactionId');
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Route observer for debugging (unchanged)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class AppRouteObserver extends NavigatorObserver {
   @override

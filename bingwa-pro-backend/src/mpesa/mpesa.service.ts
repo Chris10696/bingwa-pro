@@ -1,14 +1,28 @@
-import { Injectable, Logger, BadRequestException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+// bingwa-pro-backend/src/mpesa/mpesa.service.ts
+// W1 ripple edit: creditTokensToWallet() stubbed per primer. STK push flow
+// preserved; callback handler still saves transaction state. The actual
+// plan-grant flow (W2) will replace the stub with a call to
+// SubscriptionPlansService.createPlanFromPurchase().
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  NotFoundException,
+} from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { firstValueFrom } from 'rxjs';
-import * as crypto from 'crypto';
-import { MpesaTransaction, MpesaTransactionStatus, MpesaPaymentMethod } from './entities/mpesa-transaction.entity';
-import { StkPushRequestDto, MpesaEnvironment } from './dto/stk-push-request.dto';
+import {
+  MpesaTransaction,
+  MpesaTransactionStatus,
+  MpesaPaymentMethod,
+} from './entities/mpesa-transaction.entity';
+import { StkPushRequestDto } from './dto/stk-push-request.dto';
 import { MpesaCallbackDto } from './dto/mpesa-callback.dto';
 import { getMpesaConfig, getBaseUrl } from './config/mpesa.config';
-import { Wallet } from '../wallets/entities/wallet.entity';
 import { Agent } from '../agents/entities/agent.entity';
 import axios from 'axios';
 
@@ -23,43 +37,33 @@ export class MpesaService {
     private httpService: HttpService,
     @InjectRepository(MpesaTransaction)
     private mpesaTransactionRepository: Repository<MpesaTransaction>,
-    @InjectRepository(Wallet)
-    private walletRepository: Repository<Wallet>,
     @InjectRepository(Agent)
     private agentRepository: Repository<Agent>,
   ) {}
 
-  /**
-   * Get OAuth access token from Safaricom
-   */
   async getAccessToken(): Promise<string> {
-    // Check if we have a valid cached token
     if (this.accessToken && this.tokenExpiry && new Date() < this.tokenExpiry) {
       return this.accessToken;
     }
-
     const auth = Buffer.from(
       `${this.config.consumerKey}:${this.config.consumerSecret}`,
     ).toString('base64');
-
     const baseUrl = getBaseUrl(this.config.environment);
-
     try {
       const response = await firstValueFrom(
-        this.httpService.get(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, {
-          headers: {
-            Authorization: `Basic ${auth}`,
+        this.httpService.get(
+          `${baseUrl}/oauth/v1/generate?grant_type=client_credentials`,
+          {
+            headers: {
+              Authorization: `Basic ${auth}`,
+            },
           },
-        }),
+        ),
       );
-
-      // Store in local variable first to maintain type safety
       const token = response.data.access_token as string;
       this.accessToken = token;
-      // Token expires in 1 hour, cache for 55 minutes to be safe
       this.tokenExpiry = new Date(Date.now() + 55 * 60 * 1000);
-
-      return token; // Return the local variable instead of the class property
+      return token;
     } catch (error) {
       this.logger.error('Failed to get access token', error);
       throw new HttpException(
@@ -69,36 +73,29 @@ export class MpesaService {
     }
   }
 
-  /**
-   * Generate password for STK push
-   */
   generatePassword(): { password: string; timestamp: string } {
     const timestamp = new Date()
       .toISOString()
       .replace(/[^0-9]/g, '')
       .slice(0, -3);
-    
     const password = Buffer.from(
       `${this.config.businessShortCode}${this.config.passkey}${timestamp}`,
     ).toString('base64');
-
     return { password, timestamp };
   }
 
-  /**
-   * Initiate STK Push (Lipa Na M-Pesa Online)
-   */
-  async initiateStkPush(requestDto: StkPushRequestDto, agentId?: string): Promise<any> {
+  async initiateStkPush(
+    requestDto: StkPushRequestDto,
+    agentId?: string,
+  ): Promise<any> {
     try {
       const accessToken = await this.getAccessToken();
       const baseUrl = getBaseUrl(this.config.environment);
       const { password, timestamp } = this.generatePassword();
 
-      // Generate unique IDs for the transaction
       const merchantRequestId = `MR${Date.now()}${Math.floor(Math.random() * 1000)}`;
       const checkoutRequestId = `CR${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
-      // Prepare the request payload
       const payload = {
         BusinessShortCode: this.config.businessShortCode,
         Password: password,
@@ -110,12 +107,13 @@ export class MpesaService {
         PhoneNumber: requestDto.phoneNumber,
         CallBackURL: this.config.callbackUrl,
         AccountReference: requestDto.accountReference || `AGENT${agentId || '000'}`,
-        TransactionDesc: requestDto.transactionDesc || 'Token Purchase',
+        TransactionDesc: requestDto.transactionDesc || 'Subscription Purchase',
       };
 
-      this.logger.log(`Initiating STK push for amount ${requestDto.amount} to ${requestDto.phoneNumber}`);
+      this.logger.log(
+        `Initiating STK push for amount ${requestDto.amount} to ${requestDto.phoneNumber}`,
+      );
 
-      // Save initial transaction record
       const transaction = this.mpesaTransactionRepository.create({
         merchantRequestId,
         checkoutRequestId,
@@ -128,10 +126,8 @@ export class MpesaService {
         paymentMethod: MpesaPaymentMethod.STK_PUSH,
         requestMetadata: payload,
       });
-
       await this.mpesaTransactionRepository.save(transaction);
 
-      // Make the API call
       const response = await firstValueFrom(
         this.httpService.post(
           `${baseUrl}/mpesa/stkpush/v1/processrequest`,
@@ -146,13 +142,10 @@ export class MpesaService {
       );
 
       const responseData = response.data;
-
       if (responseData.ResponseCode === '0') {
-        // Update transaction with checkout request ID from response
         transaction.checkoutRequestId = responseData.CheckoutRequestID;
         transaction.status = MpesaTransactionStatus.PENDING;
         await this.mpesaTransactionRepository.save(transaction);
-
         return {
           success: true,
           message: 'STK push initiated successfully',
@@ -166,50 +159,48 @@ export class MpesaService {
         transaction.status = MpesaTransactionStatus.FAILED;
         transaction.errorMessage = responseData.ResponseDescription;
         await this.mpesaTransactionRepository.save(transaction);
-
-        throw new BadRequestException(responseData.ResponseDescription || 'STK push failed');
+        throw new BadRequestException(
+          responseData.ResponseDescription || 'STK push failed',
+        );
       }
     } catch (error) {
-  if (axios.isAxiosError(error)) {
-    this.logger.error(`M-Pesa failed: ${error.message}`, error.stack);
-    throw error;   // AxiosError has .status natively — no cast needed
-  }
-  throw new Error(String(error));
-}
+      if (axios.isAxiosError(error)) {
+        this.logger.error(`M-Pesa failed: ${error.message}`, error.stack);
+        throw error;
+      }
+      throw new Error(String(error));
+    }
   }
 
-  /**
-   * Handle M-Pesa callback (webhook)
-   */
   async handleCallback(callbackDto: MpesaCallbackDto): Promise<void> {
     try {
       const { stkCallback } = callbackDto.Body;
-      this.logger.log(`Received M-Pesa callback for CheckoutRequestID: ${stkCallback.checkoutRequestID}`);
+      this.logger.log(
+        `Received M-Pesa callback for CheckoutRequestID: ${stkCallback.checkoutRequestID}`,
+      );
 
-      // Find the transaction
       const transaction = await this.mpesaTransactionRepository.findOne({
         where: { checkoutRequestId: stkCallback.checkoutRequestID },
       });
-
       if (!transaction) {
-        this.logger.error(`Transaction not found for CheckoutRequestID: ${stkCallback.checkoutRequestID}`);
+        this.logger.error(
+          `Transaction not found for CheckoutRequestID: ${stkCallback.checkoutRequestID}`,
+        );
         return;
       }
 
-      // Update transaction with callback data
       transaction.stkCallback = callbackDto.Body;
       transaction.resultCode = stkCallback.resultCode.toString();
       transaction.resultDesc = stkCallback.resultDesc;
 
-      // Check if payment was successful (resultCode 0 means success)
       if (stkCallback.resultCode === 0) {
         transaction.status = MpesaTransactionStatus.COMPLETED;
-
-        // Extract metadata from callback
-        if (stkCallback.callbackMetadata && stkCallback.callbackMetadata.Item) {
+        if (
+          stkCallback.callbackMetadata &&
+          stkCallback.callbackMetadata.Item
+        ) {
           const items = stkCallback.callbackMetadata.Item;
-          
-          items.forEach(item => {
+          items.forEach((item) => {
             if (item.Name === 'MpesaReceiptNumber') {
               transaction.mpesaReceiptNumber = item.Value as string;
             } else if (item.Name === 'TransactionDate') {
@@ -219,128 +210,88 @@ export class MpesaService {
             }
           });
         }
-
-        // Credit tokens to agent's wallet
+        // W1 stub: in W2 this becomes a call to
+        // SubscriptionPlansService.createPlanFromPurchase()
         await this.creditTokensToWallet(transaction);
       } else {
         transaction.status = MpesaTransactionStatus.FAILED;
         transaction.errorMessage = stkCallback.resultDesc;
       }
-
       await this.mpesaTransactionRepository.save(transaction);
       this.logger.log(`Callback processed for transaction ${transaction.id}`);
-
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error(`Callback handling failed: ${err.message}`, err.stack);
-      // Don't throw - just log the error, M-Pesa doesn't need a response
     }
   }
 
   /**
-   * Credit tokens to agent's wallet after successful payment
+   * W1 STUB per primer rule:
+   *   "mpesa.service.creditTokensToWallet: stub. Log
+   *    SUBSCRIPTION_PURCHASE_PENDING_W2 and return."
+   *
+   * In W2 this will:
+   *   1. Look up the SubscriptionPurchase by paymentReference
+   *      (transaction.merchantRequestId or accountReference)
+   *   2. Mark it COMPLETED via SubscriptionPurchasesService.updateStatus
+   *   3. Call SubscriptionPlansService.createPlanFromPurchase(agentId, packageId)
+   *      to grant the plan.
    */
-  private async creditTokensToWallet(transaction: MpesaTransaction): Promise<void> {
-    try {
-      // Check if already credited
-      if (transaction.isTokenCredited) {
-        this.logger.log(`Tokens already credited for transaction ${transaction.id}`);
-        return;
-      }
-
-      // Find agent
-      const agent = await this.agentRepository.findOne({
-        where: { id: transaction.agentId },
-      });
-
-      if (!agent) {
-        this.logger.error(`Agent ${transaction.agentId} not found`);
-        return;
-      }
-
-      // Find or create wallet
-      let wallet = await this.walletRepository.findOne({
-        where: { agent: { id: agent.id } },
-      });
-
-      if (!wallet) {
-        wallet = this.walletRepository.create({
-          agent,
-          tokenBalance: 0,
-        });
-      }
-
-      // Credit tokens (1:1 conversion - 1 KES = 1 token)
-      const tokenAmount = transaction.amount;
-      wallet.tokenBalance = Number(wallet.tokenBalance) + tokenAmount;
-
-      await this.walletRepository.save(wallet);
-
-      // Mark transaction as credited
-      transaction.isTokenCredited = true;
-      // Here you would also create a wallet transaction record
-
-      this.logger.log(`Credited ${tokenAmount} tokens to agent ${agent.id}`);
-
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      this.logger.error(`Failed to credit tokens: ${err.message}`, err.stack);
-      // Don't throw - just log, we'll retry later
-    }
+  private async creditTokensToWallet(
+    transaction: MpesaTransaction,
+  ): Promise<void> {
+    this.logger.log(
+      `SUBSCRIPTION_PURCHASE_PENDING_W2 — mpesa.creditTokensToWallet stubbed. ` +
+        `txn=${transaction.id} agent=${transaction.agentId} amount=${transaction.amount}`,
+    );
+    return;
   }
 
-  /**
-   * Query transaction status
-   */
   async queryStatus(checkoutRequestId: string): Promise<any> {
     try {
       const transaction = await this.mpesaTransactionRepository.findOne({
         where: { checkoutRequestId },
       });
-
       if (!transaction) {
-        throw new NotFoundException(`Transaction with CheckoutRequestID ${checkoutRequestId} not found`);
+        throw new NotFoundException(
+          `Transaction with CheckoutRequestID ${checkoutRequestId} not found`,
+        );
       }
-
       return {
-        id: transaction.id,
-        checkoutRequestId: transaction.checkoutRequestId,
+        checkoutRequestId,
         status: transaction.status,
         amount: transaction.amount,
-        phoneNumber: transaction.phoneNumber,
         mpesaReceiptNumber: transaction.mpesaReceiptNumber,
-        resultCode: transaction.resultCode,
-        resultDesc: transaction.resultDesc,
-        createdAt: transaction.createdAt,
-        isTokenCredited: transaction.isTokenCredited,
+        transactionDate: transaction.transactionDate,
+        errorMessage: transaction.errorMessage,
       };
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.logger.error(`Query status failed: ${err.message}`, err.stack);
-      throw error;
+      this.logger.error(`Status query failed: ${err.message}`, err.stack);
+      throw err;
     }
   }
 
   /**
-   * Get transaction by ID
+   * Get a single M-Pesa transaction by ID. Used by /mpesa/transactions/:id.
    */
   async getTransaction(id: string): Promise<MpesaTransaction> {
     const transaction = await this.mpesaTransactionRepository.findOne({
       where: { id },
-      relations: ['agent'],
     });
-
     if (!transaction) {
-      throw new NotFoundException(`Transaction with ID ${id} not found`);
+      throw new NotFoundException(`M-Pesa transaction ${id} not found`);
     }
-
     return transaction;
   }
 
   /**
-   * Get transactions by agent
+   * Get M-Pesa transactions for an agent. Used by /mpesa/transactions.
    */
-  async getAgentTransactions(agentId: string, limit: number = 50): Promise<MpesaTransaction[]> {
+  async getAgentTransactions(
+    agentId: string,
+    limit: number = 50,
+  ): Promise<MpesaTransaction[]> {
     return this.mpesaTransactionRepository.find({
       where: { agentId },
       order: { createdAt: 'DESC' },
@@ -349,52 +300,54 @@ export class MpesaService {
   }
 
   /**
-   * Simulate callback (for testing in sandbox)
+   * Sandbox-only: simulate the callback flow for a transaction without
+   * actually calling Daraja. Used for end-to-end testing of the STK +
+   * subscription-grant pipeline. In W1 the creditTokensToWallet hook is
+   * stubbed, so this method exercises the persistence layer but does not
+   * grant a real plan.
+   *
+   * TODO(wave-2): once mpesa.creditTokensToWallet is unstubbed and rewired
+   * to SubscriptionPlansService.createPlanFromPurchase, this method becomes
+   * a real end-to-end test harness.
    */
-  async simulateCallback(transactionId: string, success: boolean = true): Promise<any> {
-    if (this.config.environment !== 'sandbox') {
-      throw new BadRequestException('Simulation only available in sandbox mode');
+  async simulateCallback(
+    transactionId: string,
+    success: boolean = true,
+  ): Promise<any> {
+    const transaction = await this.mpesaTransactionRepository.findOne({
+      where: { id: transactionId },
+    });
+    if (!transaction) {
+      throw new NotFoundException(
+        `M-Pesa transaction ${transactionId} not found`,
+      );
     }
 
-    const transaction = await this.getTransaction(transactionId);
+    if (success) {
+      transaction.status = MpesaTransactionStatus.COMPLETED;
+      transaction.mpesaReceiptNumber = `SIM${Date.now()}`;
+      transaction.transactionDate = new Date();
+      transaction.resultCode = '0';
+      transaction.resultDesc = 'Simulated success';
+      await this.mpesaTransactionRepository.save(transaction);
+      // creditTokensToWallet is stubbed in W1; this call logs but grants nothing.
+      await this.creditTokensToWallet(transaction);
+    } else {
+      transaction.status = MpesaTransactionStatus.FAILED;
+      transaction.resultCode = '1';
+      transaction.resultDesc = 'Simulated failure';
+      transaction.errorMessage = 'Simulated payment failure';
+      await this.mpesaTransactionRepository.save(transaction);
+    }
 
-    const mockCallback: MpesaCallbackDto = {
-      Body: {
-        stkCallback: {
-          merchantRequestID: transaction.merchantRequestId,
-          checkoutRequestID: transaction.checkoutRequestId,
-          resultCode: success ? 0 : 1,
-          resultDesc: success ? 'The service request is processed successfully.' : 'Transaction failed',
-          callbackMetadata: success ? {
-            Item: [
-              {
-                Name: 'Amount',
-                Value: transaction.amount,
-              },
-              {
-                Name: 'MpesaReceiptNumber',
-                Value: `MOCK${Math.floor(Math.random() * 1000000)}`,
-              },
-              {
-                Name: 'TransactionDate',
-                Value: Date.now(),
-              },
-              {
-                Name: 'PhoneNumber',
-                Value: parseInt(transaction.phoneNumber),
-              },
-            ],
-          } : undefined,
-        },
-      },
-    };
-
-    await this.handleCallback(mockCallback);
-
+    this.logger.log(
+      `Simulated callback for ${transactionId}: ${success ? 'SUCCESS' : 'FAILED'}`,
+    );
     return {
-      message: 'Callback simulated successfully',
-      transactionId: transaction.id,
-      status: success ? 'completed' : 'failed',
+      success: true,
+      transactionId,
+      status: transaction.status,
+      message: `Callback simulated as ${success ? 'success' : 'failure'}`,
     };
   }
 }

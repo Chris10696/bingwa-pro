@@ -1,34 +1,42 @@
 // lib/shared/repositories/wallet_repository.dart
-import 'package:bingwa_pro/shared/models/payment_notification.dart';
+// W1: stripped to retained methods per primer.
+//   KEEP: getWalletBalance, initiateMpesaPayment, confirmPayment
+//   RENAME: purchaseTokens → purchaseSubscription
+//           getWalletTransactions → getSubscriptionPurchases
+//   ADD:    getActivePlans, getSubscriptionPackages
+//   DELETE: transferTokens, withdrawTokens, getWalletSummary, getPaymentMethods,
+//           initiateAirtimePayment, checkTransactionStatus, cancelTransaction,
+//           getTransactionReceipt, checkForPayments, deductTokens,
+//           updatePaymentSettings
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/network/dio_client.dart';
 import '../../core/constants/api_constants.dart';
 import '../../core/utils/logger.dart';
 import '../models/wallet_model.dart';
+import '../models/subscription_package_model.dart';
+import '../models/subscription_plan_model.dart';
 
 class WalletRepository {
   final Dio _dio;
-  
   WalletRepository(this._dio);
-  
-  // Get Wallet Balance
+
+  /// GET /wallet/balance — returns composite payload:
+  ///   { hasUsableTokens, plans, wallet: {processingMode, isProcessing,
+  ///     lifetimeTokensPurchased, lifetimeTokensConsumed} }
   Future<WalletBalance> getWalletBalance() async {
     try {
       AppLogger.logNetworkRequest(
         method: 'GET',
         url: ApiConstants.walletBalance,
       );
-      
       final response = await _dio.get(ApiConstants.walletBalance);
-      
       AppLogger.logNetworkResponse(
         statusCode: response.statusCode!,
         url: ApiConstants.walletBalance,
         data: response.data,
       );
-      
-      return WalletBalance.fromJson(response.data);
+      return WalletBalance.fromJson(response.data as Map<String, dynamic>);
     } on DioException catch (e) {
       AppLogger.e('Get wallet balance failed:', e);
       rethrow;
@@ -37,205 +45,180 @@ class WalletRepository {
       rethrow;
     }
   }
-  
-  // Get Wallet Transactions
-  Future<List<WalletTransaction>> getWalletTransactions({
+
+  /// GET /subscriptions/plans/me — active plans for the logged-in agent.
+  /// Mostly used by the dashboard's plan-status readout; /wallet/balance
+  /// already returns plans inline, but this is the canonical direct fetch.
+  Future<List<SubscriptionPlan>> getActivePlans() async {
+    try {
+      AppLogger.logNetworkRequest(
+        method: 'GET',
+        url: ApiConstants.subscriptionPlansMe,
+      );
+      final response = await _dio.get(ApiConstants.subscriptionPlansMe);
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: ApiConstants.subscriptionPlansMe,
+        data: response.data,
+      );
+      final list = response.data as List<dynamic>;
+      return list
+          .map((e) => SubscriptionPlan.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (e) {
+      AppLogger.e('Get active plans failed:', e);
+      rethrow;
+    } catch (e) {
+      AppLogger.e('Get active plans error:', e);
+      rethrow;
+    }
+  }
+
+  /// GET /subscriptions/packages — full package catalog.
+  Future<List<SubscriptionPackage>> getSubscriptionPackages({
+    bool includeInactive = false,
+  }) async {
+    try {
+      AppLogger.logNetworkRequest(
+        method: 'GET',
+        url: ApiConstants.subscriptionPackages,
+      );
+      final response = await _dio.get(
+        ApiConstants.subscriptionPackages,
+        queryParameters: {
+          if (includeInactive) 'includeInactive': 'true',
+        },
+      );
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: ApiConstants.subscriptionPackages,
+        data: response.data,
+      );
+      final list = response.data as List<dynamic>;
+      return list
+          .map((e) => SubscriptionPackage.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (e) {
+      AppLogger.e('Get subscription packages failed:', e);
+      rethrow;
+    } catch (e) {
+      AppLogger.e('Get subscription packages error:', e);
+      rethrow;
+    }
+  }
+
+  /// POST /wallet/purchase-subscription — initiates STK push for a package.
+  /// W1 backend is stubbed and returns a PENDING purchase record; W2 wires
+  /// in real M-Pesa initiation.
+  Future<Map<String, dynamic>> purchaseSubscription(
+    SubscriptionPurchaseRequest request,
+  ) async {
+    try {
+      AppLogger.logNetworkRequest(
+        method: 'POST',
+        url: ApiConstants.purchaseSubscription,
+        data: request.toJson(),
+      );
+      final response = await _dio.post(
+        ApiConstants.purchaseSubscription,
+        data: request.toJson(),
+      );
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: ApiConstants.purchaseSubscription,
+        data: response.data,
+      );
+      AppLogger.logTransaction(
+        type: 'Subscription Purchase',
+        phone: request.phoneNumber ?? 'Self',
+        amount: 0, // amount comes from server-side package price
+        status: 'PENDING',
+        reference: response.data['purchaseId']?.toString() ?? '',
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      AppLogger.e('Subscription purchase failed:', e);
+      rethrow;
+    } catch (e) {
+      AppLogger.e('Subscription purchase error:', e);
+      rethrow;
+    }
+  }
+
+  /// GET /wallet/purchases — past subscription purchases (audit).
+  Future<List<SubscriptionPurchase>> getSubscriptionPurchases({
     int? limit,
     int? offset,
-    WalletTransactionType? type,
-    WalletTransactionStatus? status,
-    DateTime? startDate,
-    DateTime? endDate,
   }) async {
     try {
       final params = <String, dynamic>{};
       if (limit != null) params['limit'] = limit;
       if (offset != null) params['offset'] = offset;
-      if (type != null) params['type'] = type.name;
-      if (status != null) params['status'] = status.name;
-      if (startDate != null) params['start_date'] = startDate.toIso8601String();
-      if (endDate != null) params['end_date'] = endDate.toIso8601String();
-      
       AppLogger.logNetworkRequest(
         method: 'GET',
-        url: ApiConstants.walletTransactions,
+        url: ApiConstants.walletPurchases,
         data: params,
       );
-      
       final response = await _dio.get(
-        ApiConstants.walletTransactions,
+        ApiConstants.walletPurchases,
         queryParameters: params,
       );
-      
       AppLogger.logNetworkResponse(
         statusCode: response.statusCode!,
-        url: ApiConstants.walletTransactions,
+        url: ApiConstants.walletPurchases,
         data: response.data,
       );
-      
-      final transactions = (response.data['transactions'] as List)
-          .map((json) => WalletTransaction.fromJson(json))
+      final list = (response.data['purchases'] as List<dynamic>?) ?? const [];
+      return list
+          .map((e) => SubscriptionPurchase.fromJson(e as Map<String, dynamic>))
           .toList();
-      
-      return transactions;
     } on DioException catch (e) {
-      AppLogger.e('Get wallet transactions failed:', e);
+      AppLogger.e('Get subscription purchases failed:', e);
       rethrow;
     } catch (e) {
-      AppLogger.e('Get wallet transactions error:', e);
+      AppLogger.e('Get subscription purchases error:', e);
       rethrow;
     }
   }
-  
-  // Purchase Tokens
-  Future<WalletTransaction> purchaseTokens(TokenPurchaseRequest request) async {
+
+  /// POST /wallet/mpesa/initiate — initiate M-Pesa STK push directly.
+  /// Used as an alternative to purchaseSubscription for ad-hoc flows;
+  /// W2 may consolidate them.
+  Future<Map<String, dynamic>> initiateMpesaPayment({
+    required String phoneNumber,
+    required double amount,
+    required String reference,
+    String? description,
+  }) async {
     try {
-      AppLogger.logNetworkRequest(
-        method: 'POST',
-        url: ApiConstants.purchaseTokens,
-        data: request.toJson(),
-      );
-      
-      final response = await _dio.post(
-        ApiConstants.purchaseTokens,
-        data: request.toJson(),
-      );
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: ApiConstants.purchaseTokens,
-        data: response.data,
-      );
-      
-      final transaction = WalletTransaction.fromJson(response.data);
-      
-      AppLogger.logTransaction(
-        type: 'Token Purchase',
-        phone: 'Self',
-        amount: request.amount,
-        status: transaction.status.name,
-        reference: transaction.reference,
-      );
-      
-      return transaction;
-    } on DioException catch (e) {
-      AppLogger.e('Token purchase failed:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Token purchase error:', e);
-      rethrow;
-    }
-  }
-  
-  // Transfer tokens to another agent
-  Future<WalletTransaction> transferTokens(TransferRequest request) async {
-    try {
-      AppLogger.logNetworkRequest(
-        method: 'POST',
-        url: '/wallet/transfer',
-        data: request.toJson(),
-      );
-      
-      final response = await _dio.post(
-        '/wallet/transfer',
-        data: request.toJson(),
-      );
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/wallet/transfer',
-        data: response.data,
-      );
-      
-      final transaction = WalletTransaction.fromJson(response.data);
-      
-      AppLogger.logTransaction(
-        type: 'Transfer',
-        phone: 'To: ${request.toAgentId}',
-        amount: request.amount,
-        status: transaction.status.name,
-        reference: transaction.reference,
-      );
-      
-      return transaction;
-    } on DioException catch (e) {
-      AppLogger.e('Transfer failed:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Transfer error:', e);
-      rethrow;
-    }
-  }
-  
-  // Withdraw tokens to M-Pesa
-  Future<WalletTransaction> withdrawTokens(WithdrawalRequest request) async {
-    try {
-      AppLogger.logNetworkRequest(
-        method: 'POST',
-        url: '/wallet/withdraw',
-        data: request.toJson(),
-      );
-      
-      final response = await _dio.post(
-        '/wallet/withdraw',
-        data: request.toJson(),
-      );
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/wallet/withdraw',
-        data: response.data,
-      );
-      
-      final transaction = WalletTransaction.fromJson(response.data);
-      
-      AppLogger.logTransaction(
-        type: 'Withdrawal',
-        phone: request.phoneNumber,
-        amount: request.amount,
-        status: transaction.status.name,
-        reference: transaction.reference,
-      );
-      
-      return transaction;
-    } on DioException catch (e) {
-      AppLogger.e('Withdrawal failed:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Withdrawal error:', e);
-      rethrow;
-    }
-  }
-  
-  // Initiate M-Pesa Payment
-  Future<Map<String, dynamic>> initiateMpesaPayment(MpesaPaymentRequest request) async {
-    try {
+      final body = {
+        'phoneNumber': phoneNumber,
+        'amount': amount,
+        'reference': reference,
+        if (description != null) 'description': description,
+      };
       AppLogger.logNetworkRequest(
         method: 'POST',
         url: ApiConstants.initiateMpesa,
-        data: request.toJson(),
+        data: body,
       );
-      
       final response = await _dio.post(
         ApiConstants.initiateMpesa,
-        data: request.toJson(),
+        data: body,
       );
-      
       AppLogger.logNetworkResponse(
         statusCode: response.statusCode!,
         url: ApiConstants.initiateMpesa,
         data: response.data,
       );
-      
       AppLogger.logTransaction(
         type: 'M-Pesa Initiated',
-        phone: request.phoneNumber,
-        amount: request.amount,
+        phone: phoneNumber,
+        amount: amount,
         status: 'PENDING',
-        reference: request.reference,
+        reference: reference,
       );
-      
-      return response.data;
+      return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       AppLogger.e('M-Pesa initiation failed:', e);
       rethrow;
@@ -244,27 +227,22 @@ class WalletRepository {
       rethrow;
     }
   }
-  
-  // Confirm Payment
+
+  /// POST /wallet/confirm/:transactionId — manual fallback for users who
+  /// completed the STK PIN flow but the Daraja callback hasn't arrived.
   Future<PaymentConfirmation> confirmPayment(String transactionId) async {
     try {
-      AppLogger.logNetworkRequest(
-        method: 'POST',
-        url: '${ApiConstants.confirmPayment}/$transactionId',
-      );
-      
-      final response = await _dio.post(
-        '${ApiConstants.confirmPayment}/$transactionId',
-      );
-      
+      final url = '${ApiConstants.confirmPayment}/$transactionId';
+      AppLogger.logNetworkRequest(method: 'POST', url: url);
+      final response = await _dio.post(url);
       AppLogger.logNetworkResponse(
         statusCode: response.statusCode!,
-        url: '${ApiConstants.confirmPayment}/$transactionId',
+        url: url,
         data: response.data,
       );
-      
-      final confirmation = PaymentConfirmation.fromJson(response.data);
-      
+      final confirmation = PaymentConfirmation.fromJson(
+        response.data as Map<String, dynamic>,
+      );
       AppLogger.logTransaction(
         type: 'Payment Confirmed',
         phone: confirmation.phoneNumber ?? 'N/A',
@@ -272,7 +250,6 @@ class WalletRepository {
         status: confirmation.status,
         reference: confirmation.reference,
       );
-      
       return confirmation;
     } on DioException catch (e) {
       AppLogger.e('Payment confirmation failed:', e);
@@ -282,318 +259,8 @@ class WalletRepository {
       rethrow;
     }
   }
-  
-  // Get Wallet Summary
-  Future<WalletSummary> getWalletSummary() async {
-    try {
-      AppLogger.logNetworkRequest(
-        method: 'GET',
-        url: '/wallet/summary',
-      );
-      
-      final response = await _dio.get('/wallet/summary');
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/wallet/summary',
-        data: response.data,
-      );
-      
-      return WalletSummary.fromJson(response.data);
-    } on DioException catch (e) {
-      AppLogger.e('Get wallet summary failed:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Get wallet summary error:', e);
-      rethrow;
-    }
-  }
-  
-  // Get Payment Methods
-  Future<List<PaymentMethod>> getPaymentMethods() async {
-    try {
-      AppLogger.logNetworkRequest(
-        method: 'GET',
-        url: '/wallet/payment-methods',
-      );
-      
-      final response = await _dio.get('/wallet/payment-methods');
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/wallet/payment-methods',
-        data: response.data,
-      );
-      
-      final methods = (response.data['methods'] as List)
-          .map((json) => PaymentMethod.fromJson(json))
-          .toList();
-      
-      return methods;
-    } on DioException catch (e) {
-      AppLogger.e('Get payment methods failed:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Get payment methods error:', e);
-      rethrow;
-    }
-  }
-  
-  // Initiate Airtime Payment
-  Future<Map<String, dynamic>> initiateAirtimePayment(AirtimePaymentRequest request) async {
-    try {
-      AppLogger.logNetworkRequest(
-        method: 'POST',
-        url: '/wallet/airtime/initiate',
-        data: request.toJson(),
-      );
-      
-      final response = await _dio.post(
-        '/wallet/airtime/initiate',
-        data: request.toJson(),
-      );
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/wallet/airtime/initiate',
-        data: response.data,
-      );
-      
-      AppLogger.logTransaction(
-        type: 'Airtime Payment Initiated',
-        phone: request.phoneNumber,
-        amount: request.amount,
-        status: 'PENDING',
-        reference: request.reference,
-      );
-      
-      return response.data;
-    } on DioException catch (e) {
-      AppLogger.e('Airtime payment initiation failed:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Airtime payment initiation error:', e);
-      rethrow;
-    }
-  }
-  
-  // Check Transaction Status
-  Future<WalletTransaction> checkTransactionStatus(String transactionId) async {
-    try {
-      AppLogger.logNetworkRequest(
-        method: 'GET',
-        url: '/wallet/transactions/$transactionId/status',
-      );
-      
-      final response = await _dio.get('/wallet/transactions/$transactionId/status');
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/wallet/transactions/$transactionId/status',
-        data: response.data,
-      );
-      
-      return WalletTransaction.fromJson(response.data);
-    } on DioException catch (e) {
-      AppLogger.e('Check transaction status failed:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Check transaction status error:', e);
-      rethrow;
-    }
-  }
-  
-  // Cancel Pending Transaction
-  Future<void> cancelTransaction(String transactionId) async {
-    try {
-      AppLogger.logNetworkRequest(
-        method: 'POST',
-        url: '/wallet/transactions/$transactionId/cancel',
-      );
-      
-      final response = await _dio.post('/wallet/transactions/$transactionId/cancel');
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/wallet/transactions/$transactionId/cancel',
-        data: response.data,
-      );
-      
-      AppLogger.logTransaction(
-        type: 'Transaction Cancelled',
-        phone: 'N/A',
-        amount: 0,
-        status: 'CANCELLED',
-        reference: transactionId,
-      );
-    } on DioException catch (e) {
-      AppLogger.e('Cancel transaction failed:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Cancel transaction error:', e);
-      rethrow;
-    }
-  }
-  
-  // Get Transaction Receipt
-  Future<Map<String, dynamic>> getTransactionReceipt(String transactionId) async {
-    try {
-      AppLogger.logNetworkRequest(
-        method: 'GET',
-        url: '/wallet/transactions/$transactionId/receipt',
-      );
-      
-      final response = await _dio.get('/wallet/transactions/$transactionId/receipt');
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/wallet/transactions/$transactionId/receipt',
-        data: response.data,
-      );
-      
-      return response.data;
-    } on DioException catch (e) {
-      AppLogger.e('Get transaction receipt failed:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Get transaction receipt error:', e);
-      rethrow;
-    }
-  }
-
-  // ===== FIXED: Moved these methods INSIDE the class =====
-  
-  // Check for payments
-  Future<List<PaymentNotification>> checkForPayments({
-    String? tillNumber,
-    String? paybillNumber,
-    DateTime? lastCheckTime,
-  }) async {
-    try {
-      final request = <String, dynamic>{
-        'tillNumber': tillNumber,
-        'paybillNumber': paybillNumber,
-        'lastCheckTime': lastCheckTime?.toIso8601String(),
-      };
-      
-      AppLogger.logNetworkRequest(
-        method: 'POST',
-        url: '/wallet/check-payments',
-        data: request,
-      );
-      
-      final response = await _dio.post(
-        '/wallet/check-payments',
-        data: request,
-      );
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/wallet/check-payments',
-        data: response.data,
-      );
-      
-      final payments = (response.data['payments'] as List)
-          .map((json) => PaymentNotification.fromJson(json))
-          .toList();
-      
-      return payments;
-    } on DioException catch (e) {
-      AppLogger.e('Failed to check for payments:', e);
-      return [];
-    } catch (e) {
-      AppLogger.e('Failed to check for payments:', e);
-      return [];
-    }
-  }
-  
-  // Deduct tokens
-  Future<void> deductTokens({
-    required int amount,
-    required String transactionId,
-    required String customerPhone,
-    required String productId,
-  }) async {
-    try {
-      final request = <String, dynamic>{
-        'amount': amount,
-        'transactionId': transactionId,
-        'customerPhone': customerPhone,
-        'productId': productId,
-      };
-      
-      AppLogger.logNetworkRequest(
-        method: 'POST',
-        url: '/wallet/deduct-tokens',
-        data: request,
-      );
-      
-      final response = await _dio.post(
-        '/wallet/deduct-tokens',
-        data: request,
-      );
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/wallet/deduct-tokens',
-        data: response.data,
-      );
-    } on DioException catch (e) {
-      AppLogger.e('Failed to deduct tokens:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Failed to deduct tokens:', e);
-      rethrow;
-    }
-  }
-  
-  // Update payment settings
-  Future<void> updatePaymentSettings({
-    required String agentId,
-    String? tillNumber,
-    String? paybillNumber,
-    String? paybillAccount,
-    required String method,
-    required bool autoDetect,
-  }) async {
-    try {
-      final request = <String, dynamic>{
-        'agentId': agentId,
-        'tillNumber': tillNumber,
-        'paybillNumber': paybillNumber,
-        'paybillAccount': paybillAccount,
-        'method': method,
-        'autoDetect': autoDetect,
-      };
-      
-      AppLogger.logNetworkRequest(
-        method: 'POST',
-        url: '/agents/payment-settings',
-        data: request,
-      );
-      
-      final response = await _dio.post(
-        '/agents/payment-settings',
-        data: request,
-      );
-      
-      AppLogger.logNetworkResponse(
-        statusCode: response.statusCode!,
-        url: '/agents/payment-settings',
-        data: response.data,
-      );
-    } on DioException catch (e) {
-      AppLogger.e('Failed to update payment settings:', e);
-      rethrow;
-    } catch (e) {
-      AppLogger.e('Failed to update payment settings:', e);
-      rethrow;
-    }
-  }
-  // ======================================================
 }
 
-// Provider
 final walletRepositoryProvider = Provider<WalletRepository>((ref) {
   final dio = ref.watch(dioClientProvider);
   return WalletRepository(dio);

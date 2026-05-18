@@ -1,10 +1,22 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+// bingwa-pro-backend/src/transactions/transactions.service.ts
+// W1: service bodies preserved unchanged. Entity field renames (productId →
+// offerId, productName → offerName, drop bundleSize) don't affect this
+// service since it doesn't reference those fields in its query bodies.
+// TransactionType/TransactionStatus enum imports unchanged at usage sites.
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThan, MoreThan } from 'typeorm';
-import { Transaction, TransactionType, TransactionStatus } from './entities/transaction.entity';
+import { Repository, MoreThan } from 'typeorm';
+import {
+  Transaction,
+  TransactionType,
+  TransactionStatus,
+} from './entities/transaction.entity';
 import { Agent } from '../agents/entities/agent.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
-
 
 @Injectable()
 export class TransactionsService {
@@ -33,45 +45,64 @@ export class TransactionsService {
       sortBy: string;
       sortDesc: boolean;
     },
-  ): Promise<{ transactions: Transaction[]; total: number; page: number; pageSize: number }> {
-    const queryBuilder = this.transactionsRepository.createQueryBuilder('transaction')
+  ): Promise<{
+    transactions: Transaction[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
+    const queryBuilder = this.transactionsRepository
+      .createQueryBuilder('transaction')
       .leftJoinAndSelect('transaction.agent', 'agent')
       .where('agent.id = :agentId', { agentId })
       .skip((filter.page - 1) * filter.pageSize)
       .take(filter.pageSize);
 
-    // Apply filters
     if (filter.startDate) {
-      queryBuilder.andWhere('transaction.createdAt >= :startDate', { startDate: filter.startDate });
+      queryBuilder.andWhere('transaction.createdAt >= :startDate', {
+        startDate: filter.startDate,
+      });
     }
     if (filter.endDate) {
-      queryBuilder.andWhere('transaction.createdAt <= :endDate', { endDate: filter.endDate });
+      queryBuilder.andWhere('transaction.createdAt <= :endDate', {
+        endDate: filter.endDate,
+      });
     }
     if (filter.types && filter.types.length > 0) {
-      queryBuilder.andWhere('transaction.type IN (:...types)', { types: filter.types });
+      queryBuilder.andWhere('transaction.type IN (:...types)', {
+        types: filter.types,
+      });
     }
     if (filter.statuses && filter.statuses.length > 0) {
-      queryBuilder.andWhere('transaction.status IN (:...statuses)', { statuses: filter.statuses });
+      queryBuilder.andWhere('transaction.status IN (:...statuses)', {
+        statuses: filter.statuses,
+      });
     }
     if (filter.customerPhone) {
-      queryBuilder.andWhere('transaction.recipientPhone LIKE :phone', { phone: `%${filter.customerPhone}%` });
+      queryBuilder.andWhere('transaction.recipientPhone LIKE :phone', {
+        phone: `%${filter.customerPhone}%`,
+      });
     }
     if (filter.minAmount) {
-      queryBuilder.andWhere('transaction.amount >= :minAmount', { minAmount: filter.minAmount });
+      queryBuilder.andWhere('transaction.amount >= :minAmount', {
+        minAmount: filter.minAmount,
+      });
     }
     if (filter.maxAmount) {
-      queryBuilder.andWhere('transaction.amount <= :maxAmount', { maxAmount: filter.maxAmount });
+      queryBuilder.andWhere('transaction.amount <= :maxAmount', {
+        maxAmount: filter.maxAmount,
+      });
     }
     if (filter.reference) {
-      queryBuilder.andWhere('transaction.reference LIKE :ref', { ref: `%${filter.reference}%` });
+      queryBuilder.andWhere('transaction.reference LIKE :ref', {
+        ref: `%${filter.reference}%`,
+      });
     }
 
-    // Apply sorting
     const order = filter.sortDesc ? 'DESC' : 'ASC';
     queryBuilder.orderBy(`transaction.${filter.sortBy}`, order);
 
     const [transactions, total] = await queryBuilder.getManyAndCount();
-
     return {
       transactions,
       total,
@@ -90,13 +121,13 @@ export class TransactionsService {
       metadata?: Record<string, any>;
     },
   ): Promise<Transaction> {
-    const agent = await this.agentsRepository.findOne({ where: { id: agentId } });
+    const agent = await this.agentsRepository.findOne({
+      where: { id: agentId },
+    });
     if (!agent) {
       throw new NotFoundException('Agent not found');
     }
-
     const reference = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
-
     const transaction = this.transactionsRepository.create({
       agent,
       reference,
@@ -107,7 +138,6 @@ export class TransactionsService {
       metadata: data.metadata,
       status: TransactionStatus.INITIATED,
     });
-
     return this.transactionsRepository.save(transaction);
   }
 
@@ -121,11 +151,9 @@ export class TransactionsService {
       where: { id: transactionId },
       relations: ['agent'],
     });
-
     if (!transaction) {
       throw new NotFoundException('Transaction not found');
     }
-
     transaction.status = status;
     if (errorMessage) {
       transaction.errorMessage = errorMessage;
@@ -133,7 +161,6 @@ export class TransactionsService {
     if (safaricomRef) {
       transaction.safaricomRef = safaricomRef;
     }
-
     return this.transactionsRepository.save(transaction);
   }
 
@@ -142,18 +169,15 @@ export class TransactionsService {
       where: { id: transactionId },
       relations: ['agent'],
     });
-
     if (!transaction) {
       throw new NotFoundException('Transaction not found');
     }
-
     return transaction;
   }
 
   async getTransactionSummary(agentId: string, period: string): Promise<any> {
     const now = new Date();
     let startDate: Date;
-
     switch (period) {
       case 'today':
         startDate = new Date(now.setHours(0, 0, 0, 0));
@@ -165,24 +189,27 @@ export class TransactionsService {
         startDate = new Date(now.setMonth(now.getMonth() - 1));
         break;
       default:
-        startDate = new Date(0); // Beginning of time
+        startDate = new Date(0);
     }
-
     const transactions = await this.transactionsRepository.find({
       where: {
         agent: { id: agentId },
         createdAt: MoreThan(startDate),
       },
     });
-
     const total = transactions.length;
-    const successful = transactions.filter(t => t.status === TransactionStatus.SUCCESS).length;
-    const failed = transactions.filter(t => t.status === TransactionStatus.FAILED).length;
-    const pending = transactions.filter(t => t.status === TransactionStatus.PENDING).length;
+    const successful = transactions.filter(
+      (t) => t.status === TransactionStatus.SUCCESS,
+    ).length;
+    const failed = transactions.filter(
+      (t) => t.status === TransactionStatus.FAILED,
+    ).length;
+    const pending = transactions.filter(
+      (t) => t.status === TransactionStatus.PENDING,
+    ).length;
     const totalAmount = transactions
-      .filter(t => t.status === TransactionStatus.SUCCESS)
+      .filter((t) => t.status === TransactionStatus.SUCCESS)
       .reduce((sum, t) => sum + Number(t.amount), 0);
-
     return {
       total,
       successful,
@@ -193,15 +220,13 @@ export class TransactionsService {
     };
   }
 
-    async recordSmsPayment(data: any, agentId: string) {
-    // Check for duplicate
+  async recordSmsPayment(data: any, agentId: string) {
     const existing = await this.transactionsRepository.findOne({
       where: { mpesaTransactionId: data.mpesaTransactionId, agentId },
     });
     if (existing) {
       throw new ConflictException('Payment already processed');
     }
-    // Save record
     const tx = this.transactionsRepository.create({
       ...data,
       agentId,

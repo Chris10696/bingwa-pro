@@ -1,9 +1,14 @@
 // lib/features/transactions/presentation/providers/transaction_provider.dart
+// W1 edits per primer entity renames:
+//   - retryTransaction(): productName/bundleSize → offerName, bundleSize dropped
+//   - recordTransaction(): productId/productName → offerId/offerName per Q1
+//     (keep with rename only; scaffolding values preserved with TODO markers)
+// All other methods preserved verbatim.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:bingwa_pro/shared/models/transaction_model.dart';
 import 'package:bingwa_pro/shared/repositories/transaction_repository.dart';
-import 'package:bingwa_pro/core/utils/logger.dart'; // FIX: Correct AppLogger import
+import 'package:bingwa_pro/core/utils/logger.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../../core/security/device_fingerprint.dart';
 
@@ -59,7 +64,7 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
   final TransactionRepository _repository;
   final Ref _ref;
   final DeviceInfoPlugin _deviceInfo = DeviceInfoPlugin();
-  
+
   String _currentFilter = 'all';
   String _currentPeriod = 'today';
 
@@ -68,20 +73,14 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
   Future<void> loadTransactions() async {
     try {
       state = state.copyWith(isLoading: true, error: null);
-      
-      // Create TransactionFilter based on current filter and period
       final filter = _createTransactionFilter(
         page: 1,
         filter: _currentFilter,
         period: _currentPeriod,
       );
-      
-      // Use getTransactionHistory instead of getTransactions
       final response = await _repository.getTransactionHistory(filter);
-      
-      // Convert TransactionDetails to Transaction using the extension method
-      final transactions = response.transactions.map((details) => details.toTransaction()).toList();
-      
+      final transactions =
+          response.transactions.map((details) => details.toTransaction()).toList();
       state = state.copyWith(
         transactions: transactions,
         isLoading: false,
@@ -98,24 +97,17 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
 
   Future<void> loadMoreTransactions() async {
     if (state.isLoadingMore || !state.hasMore) return;
-
     try {
       state = state.copyWith(isLoadingMore: true);
       final nextPage = state.page + 1;
-      
-      // Create TransactionFilter for the next page
       final filter = _createTransactionFilter(
         page: nextPage,
         filter: _currentFilter,
         period: _currentPeriod,
       );
-      
-      // Use getTransactionHistory instead of getTransactions
       final response = await _repository.getTransactionHistory(filter);
-      
-      // Convert TransactionDetails to Transaction using the extension method
-      final moreTransactions = response.transactions.map((details) => details.toTransaction()).toList();
-      
+      final moreTransactions =
+          response.transactions.map((details) => details.toTransaction()).toList();
       state = state.copyWith(
         transactions: [...state.transactions, ...moreTransactions],
         isLoadingMore: false,
@@ -144,53 +136,40 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
     await loadTransactions();
   }
 
-  // Helper method to get device ID
   Future<String> _getDeviceId() async {
     try {
-      // First try to get from DeviceFingerprint
       final deviceId = await DeviceFingerprint.generateDeviceId();
       if (deviceId.isNotEmpty) {
         return deviceId;
       }
-      
-      // Fallback to device info
       final androidInfo = await _deviceInfo.androidInfo;
       return androidInfo.id;
     } catch (e) {
-      // Last resort fallback
       return 'unknown_device_${DateTime.now().millisecondsSinceEpoch}';
     }
   }
 
-  // Retry transaction
   Future<TransactionResponse?> retryTransaction(String transactionId) async {
-    state = state.copyWith(isRetrying: true, retryError: null, retrySuccessMessage: null);
-
+    state = state.copyWith(
+        isRetrying: true, retryError: null, retrySuccessMessage: null);
     try {
-      // Get agent ID from auth state
       final authState = _ref.read(authNotifierProvider);
       final agentId = authState.agent?.id ?? '';
-      
       if (agentId.isEmpty) {
         throw Exception('Agent ID not found. Please login again.');
       }
-
-      // Get device ID
       final deviceId = await _getDeviceId();
-
-      // Create retry request
       final request = RetryRequest(
         transactionId: transactionId,
         agentId: agentId,
         deviceId: deviceId,
-        newUssdCode: null, // Use original USSD code
+        newUssdCode: null,
         overrideParams: null,
       );
 
-      // Execute retry
       final response = await _repository.retryTransaction(request);
 
-      // Update the transaction in the list
+      // W1: productName → offerName; bundleSize dropped.
       final updatedTransactions = state.transactions.map((t) {
         if (t.id == transactionId) {
           return Transaction(
@@ -205,8 +184,8 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
             description: t.description,
             commission: response.commission,
             agentId: t.agentId,
-            productName: t.productName,
-            bundleSize: t.bundleSize,
+            offerName: t.offerName,
+            subscriptionPlanId: t.subscriptionPlanId,
             balanceAfter: response.balanceAfter,
           );
         }
@@ -218,7 +197,6 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
         isRetrying: false,
         retrySuccessMessage: 'Transaction retried successfully',
       );
-
       return response;
     } catch (e) {
       state = state.copyWith(
@@ -229,50 +207,49 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
     }
   }
 
-  // ===== NEW METHOD: Record Transaction (MOVED INSIDE CLASS) =====
+  /// Q1 default: keep with field renames only.
+  /// This method has hardcoded scaffolding values (type, offerName) that
+  /// should be replaced by W2 when the offer-execution flow is wired in.
   Future<TransactionDetails> recordTransaction({
     required String customerPhone,
     required double amount,
-    required String productId,
+    required String offerId, // renamed from productId
     required String reference,
   }) async {
     try {
-      // Get agent ID from auth state
       final authState = _ref.read(authNotifierProvider);
       final agentId = authState.agent?.id ?? '';
-      
       if (agentId.isEmpty) {
         throw Exception('Agent ID not found. Please login again.');
       }
-
-      // Create transaction details
+      // TODO(wave-2): replace hardcoded type/offerName/commission/tokenAmount
+      //   with real values from the offer-execution flow. W1 keeps the
+      //   scaffolding so the method signature stays callable.
       final transaction = TransactionDetails(
         id: 'txn_${DateTime.now().millisecondsSinceEpoch}',
         agentId: agentId,
         customerPhone: customerPhone,
         amount: amount,
-        type: TransactionType.data, // This should come from product
+        type: TransactionType.data, // TODO(wave-2): from offer.category
         status: TransactionStatus.success,
-        productId: productId,
-        productName: 'Data Bundle', // This should come from product
+        offerId: offerId,
+        offerName: 'Subscription Offer', // TODO(wave-2): from offer.name
         reference: reference,
         safaricomReference: reference,
         tokenAmount: 1,
-        commission: amount * 0.05,
+        commission: amount * 0.05, // TODO(wave-2): from commission service (W5)
         balanceAfter: 0,
         createdAt: DateTime.now(),
         completedAt: DateTime.now(),
       );
 
-      // Convert to Transaction and update state
       final newTransaction = transaction.toTransaction();
       final updatedTransactions = [newTransaction, ...state.transactions];
-      
+
       state = state.copyWith(
         transactions: updatedTransactions.take(50).toList(),
       );
 
-      // Log the transaction
       AppLogger.logTransaction(
         type: 'Record',
         phone: customerPhone,
@@ -280,16 +257,13 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
         status: 'SUCCESS',
         reference: reference,
       );
-
       return transaction;
     } catch (e) {
       AppLogger.e('Failed to record transaction:', e);
       rethrow;
     }
   }
-  // ===============================================================
 
-  // Clear retry messages
   void clearRetryMessages() {
     state = state.copyWith(
       retryError: null,
@@ -297,13 +271,11 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
     );
   }
 
-  // Helper method to create TransactionFilter from filter string and period
   TransactionFilter _createTransactionFilter({
     required int page,
     required String filter,
     required String period,
   }) {
-    // Map filter string to TransactionStatus
     List<TransactionStatus>? statuses;
     if (filter == 'success') {
       statuses = [TransactionStatus.success];
@@ -317,13 +289,9 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
         TransactionStatus.executing,
       ];
     }
-    // 'all' will keep statuses as null
-
-    // Map period to date range
     DateTime? startDate;
     DateTime? endDate;
     final now = DateTime.now();
-    
     switch (period) {
       case 'today':
         startDate = DateTime(now.year, now.month, now.day);
@@ -339,10 +307,8 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
         break;
       case 'all':
       default:
-        // No date filter for 'all'
         break;
     }
-    
     return TransactionFilter(
       page: page,
       pageSize: 20,
@@ -352,7 +318,6 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
     );
   }
 
-  // Get transaction by ID
   Transaction? getTransactionById(String id) {
     try {
       return state.transactions.firstWhere((t) => t.id == id);
@@ -362,8 +327,8 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
   }
 }
 
-// Provider
-final transactionProvider = StateNotifierProvider<TransactionNotifier, TransactionState>((ref) {
+final transactionProvider =
+    StateNotifierProvider<TransactionNotifier, TransactionState>((ref) {
   final repository = ref.read(transactionRepositoryProvider);
   return TransactionNotifier(repository, ref);
 });

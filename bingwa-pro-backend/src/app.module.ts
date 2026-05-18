@@ -1,3 +1,9 @@
+// bingwa-pro-backend/src/app.module.ts
+// W1: ProductsModule → OffersModule. Adds CategoriesModule and
+// SubscriptionsModule. Entity auto-discovery (`__dirname + '/**/*.entity{.ts,.js}'`)
+// picks up the new entities (Offer, Category, SubscriptionPackage,
+// SubscriptionPlan, SubscriptionPurchase) automatically — no entities array
+// edit needed.
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -6,9 +12,11 @@ import { AgentsModule } from './agents/agents.module';
 import { AuthModule } from './auth/auth.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { TransactionsModule } from './transactions/transactions.module';
-import { ProductsModule } from './products/products.module';
+import { OffersModule } from './offers/offers.module';
+import { CategoriesModule } from './categories/categories.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { UssdModule } from './ussd/ussd.module';
-import { MpesaModule } from './mpesa/mpesa.module'; // Add this
+import { MpesaModule } from './mpesa/mpesa.module';
 import { HttpModule } from '@nestjs/axios';
 
 @Module({
@@ -17,10 +25,12 @@ import { HttpModule } from '@nestjs/axios';
       timeout: 30000,
       maxRedirects: 5,
     }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 100,
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
     ConfigModule.forRoot({
       isGlobal: true,
     }),
@@ -35,16 +45,18 @@ import { HttpModule } from '@nestjs/axios';
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_NAME'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: true, // Set to false in production
+        synchronize: true, // W1: stays true. Migration switchover deferred to pre-prod.
       }),
     }),
     AgentsModule,
     AuthModule,
     WalletsModule,
     TransactionsModule,
-    ProductsModule,
+    OffersModule,
+    CategoriesModule,
+    SubscriptionsModule,
     UssdModule,
-    MpesaModule, // Add this
+    MpesaModule,
   ],
 })
 export class AppModule {}

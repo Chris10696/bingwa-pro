@@ -1,12 +1,30 @@
 // bingwa-pro-backend/src/transactions/entities/transaction.entity.ts
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Unique } from 'typeorm';
+// W1 ripple edit:
+//   - productId → offerId, productName → offerName
+//   - bundleSize dropped (subsumed by offer's name/validityLabel)
+//   - ussdCode + ussdResponse retained (runtime, not offer metadata)
+//   - Added subscriptionPlanId FK (ON DELETE SET NULL) per Q5 locked rule
+//   - TransactionType: AIRTIME and BUNDLE dropped; TOKEN_PURCHASE renamed to
+//     SUBSCRIPTION_PURCHASE; MINUTES added
+//   - tokenAmount field retained for now (commission column for W5; deferred)
+import {
+  Entity,
+  Column,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
+  Unique,
+} from 'typeorm';
 import { Agent } from '../../agents/entities/agent.entity';
+import { SubscriptionPlan } from '../../subscriptions/entities/subscription-plan.entity';
 
 export enum TransactionType {
-  AIRTIME = 'airtime',
   DATA = 'data',
+  MINUTES = 'minutes',
   SMS = 'sms',
-  TOKEN_PURCHASE = 'token_purchase',
+  SUBSCRIPTION_PURCHASE = 'subscription_purchase',
   COMMISSION = 'commission',
 }
 
@@ -29,14 +47,12 @@ export class Transaction {
   @Column({ unique: true })
   reference: string;
 
-  // ===== AGENT RELATIONSHIP - FIXED =====
   @Column()
   agentId: string;
 
   @ManyToOne(() => Agent)
   @JoinColumn({ name: 'agentId' })
   agent: Agent;
-  // ======================================
 
   @Column({
     type: 'enum',
@@ -47,10 +63,8 @@ export class Transaction {
   @Column('decimal', { precision: 15, scale: 2 })
   amount: number;
 
-  // ===== CUSTOMER PHONE FIELD (Fixes the 'customerPhone' error) =====
   @Column({ nullable: true })
   customerPhone: string;
-  // ====================================================================
 
   @Column({ nullable: true })
   recipientPhone: string;
@@ -72,32 +86,41 @@ export class Transaction {
   safaricomRef: string;
 
   @Column({ nullable: true })
-  safaricomReference: string; // Alias for safaricomRef
+  safaricomReference: string;
 
-  // ===== PRODUCT FIELDS =====
+  // ===== OFFER FIELDS (renamed from product*) =====
   @Column({ nullable: true })
-  productId: string;
-
-  @Column({ nullable: true })
-  productName: string;
+  offerId: string;
 
   @Column({ nullable: true })
-  bundleSize: string;
+  offerName: string;
 
   @Column({ nullable: true })
   ussdCode: string;
 
   @Column({ nullable: true })
   ussdResponse: string;
-  // ==========================
+  // ================================================
 
-  // ===== TOKEN FIELDS =====
+  // ===== SUBSCRIPTION PLAN ATTRIBUTION (per Q5) =====
+  // Which active plan was debited for this consumption. Nullable: pre-W1
+  // transactions don't have it; W3+ may have transactions that consumed
+  // from no plan (e.g. free retries, system-initiated). ON DELETE SET NULL
+  // so plan history can be reconstructed even after plan rows are pruned.
+  // Not indexed in W1 — revisit in W5 statistics work.
+  @Column({ type: 'uuid', nullable: true })
+  subscriptionPlanId: string | null;
+
+  @ManyToOne(() => SubscriptionPlan, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'subscriptionPlanId' })
+  subscriptionPlan: SubscriptionPlan | null;
+  // ==================================================
+
   @Column({ default: 0 })
   tokenAmount: number;
 
   @Column('decimal', { precision: 15, scale: 2, default: 0 })
   commission: number;
-  // ========================
 
   @Column('jsonb', { nullable: true })
   metadata: Record<string, any>;
@@ -141,6 +164,6 @@ export class Transaction {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  @Column({ nullable: true, unique: false })  // not globally unique, but unique per agent (enforced by @Unique above)
+  @Column({ nullable: true, unique: false })
   mpesaTransactionId: string;
 }

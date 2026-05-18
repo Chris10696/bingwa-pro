@@ -1,57 +1,58 @@
 // bingwa-pro-backend/src/wallets/entities/wallet.entity.ts
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToOne, JoinColumn } from 'typeorm';
+// W1: drastically simplified per primer. "Do I have tokens?" reads from
+// SubscriptionPlan, NOT from Wallet. Wallet now only tracks processing state
+// and lifetime counters for analytics.
+import {
+  Entity,
+  Column,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+  OneToOne,
+  JoinColumn,
+} from 'typeorm';
 import { Agent } from '../../agents/entities/agent.entity';
+
+export enum ProcessingMode {
+  EXPRESS = 'express',
+  ADVANCED = 'advanced',
+}
 
 @Entity('wallets')
 export class Wallet {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @OneToOne(() => Agent, agent => agent.wallet)
+  @OneToOne(() => Agent, (agent) => agent.wallet)
   @JoinColumn()
   agent: Agent;
 
   @Column()
   agentId: string;
 
-  @Column({ 
-    type: 'decimal', 
-    precision: 15, 
-    scale: 2, 
-    default: 0,
-    transformer: {
-      to: (value: number) => value,
-      from: (value: string) => parseFloat(value)
-    }
+  @Column({
+    type: 'enum',
+    enum: ProcessingMode,
+    default: ProcessingMode.EXPRESS,
   })
-  tokenBalance: number; // Keep as decimal for KES, but tokens are whole numbers
-
-  @Column({ type: 'int', default: 0 })
-  tokenBalanceInt: number; // Add integer token balance for precise counting
-
-  @Column({ type: 'int', default: 0 })
-  lifetimeTokens: number; // Total tokens ever purchased
-
-  @Column({ type: 'int', default: 0 })
-  tokensConsumed: number; // Total tokens used
-
-  @Column({ nullable: true })
-  lastTopupAt: Date;
-
-  @Column({ nullable: true })
-  lastConsumptionAt: Date;
+  processingMode: ProcessingMode;
 
   @Column({ default: false })
-  isProcessing: boolean; // Whether USSD processing is active
+  isProcessing: boolean;
 
-  @Column({ nullable: true })
-  processingStartedAt: Date;
+  @Column({ type: 'timestamp', nullable: true })
+  processingStartedAt: Date | null;
 
-  @Column({ nullable: true })
-  processingPausedAt: Date;
+  @Column({ type: 'timestamp', nullable: true })
+  processingPausedAt: Date | null;
 
-  @Column({ default: 'express' })
-  processingMode: string; // 'express' or 'advanced'
+  // Running totals for analytics only. Not used for "can the agent consume?"
+  // decisions — that question reads from SubscriptionPlan.
+  @Column({ type: 'int', default: 0 })
+  lifetimeTokensPurchased: number;
+
+  @Column({ type: 'int', default: 0 })
+  lifetimeTokensConsumed: number;
 
   @CreateDateColumn()
   createdAt: Date;

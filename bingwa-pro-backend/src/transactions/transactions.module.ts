@@ -1,3 +1,7 @@
+// bingwa-pro-backend/src/transactions/transactions.module.ts
+// W1: no structural changes. Transaction entity carries a subscriptionPlanId
+// FK now, but the SubscriptionPlan entity is registered in SubscriptionsModule
+// — TypeORM resolves the relation via entity-decorator metadata.
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TransactionsController } from './transactions.controller';

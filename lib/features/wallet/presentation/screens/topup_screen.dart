@@ -1,27 +1,23 @@
+// lib/features/wallet/presentation/screens/topup_screen.dart
+// W1: rewritten for Q8a/Q8b — package selection + STK push + fallback confirm.
+//   Flow:
+//     1. Load packages via wallet provider's state.packages.
+//     2. User taps a package → state.selectedPackageId set.
+//     3. User taps Subscribe → notifier.purchaseSubscription(packageId).
+//        Backend stub records PENDING purchase (W2 wires real STK).
+//     4. Show spinner + "Check your phone for the M-Pesa PIN prompt".
+//     5. After 15s, reveal "I have paid" fallback button (Q8b path ii).
+//     6. Tap "I have paid" → notifier.confirmPayment(purchaseId).
+//     7. Success/failure dialogs.
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:formz/formz.dart';
 import '../../../../core/widgets/loading_indicator.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
-import '../../../../core/utils/validators.dart';
-import '../../../../core/utils/formatters.dart';
+import '../../../../shared/models/subscription_package_model.dart';
 import '../../../../shared/models/wallet_model.dart';
 import '../providers/wallet_provider.dart';
-
-class AmountInput extends FormzInput<String, String> {
-  const AmountInput.pure() : super.pure('');
-  const AmountInput.dirty([super.value = '']) : super.dirty();
-
-  @override
-  String? validator(String? value) {
-    return Validators.isValidAmount(
-      value,
-      min: 100.0,
-      max: 100000.0,
-    );
-  }
-}
 
 class TopUpScreen extends ConsumerStatefulWidget {
   const TopUpScreen({super.key});
@@ -31,371 +27,331 @@ class TopUpScreen extends ConsumerStatefulWidget {
 }
 
 class _TopUpScreenState extends ConsumerState<TopUpScreen> {
-  final _amountController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
+  // Tracks whether the 15-second timer has elapsed, gating the
+  // "I have paid" fallback button (Q8b path ii).
+  bool _showManualConfirm = false;
+  Timer? _manualConfirmTimer;
 
   @override
   void initState() {
     super.initState();
-    // Load payment methods
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(walletNotifierProvider.notifier).loadWalletData();
     });
   }
 
   @override
+  void dispose() {
+    _manualConfirmTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final state = ref.watch(walletNotifierProvider);
-    final notifier = ref.read(walletNotifierProvider.notifier);
+
+    // Auto-show success/failure dialog when pendingPurchase status flips.
+    // Note: in W1 the backend stub never flips status server-side, so this
+    // is exercised only when the manual confirm button is tapped.
+    ref.listen<WalletState>(walletNotifierProvider, (prev, next) {
+      final prevStatus = prev?.pendingPurchase?.status;
+      final nextStatus = next.pendingPurchase?.status;
+      if (prevStatus == SubscriptionPurchaseStatus.pending &&
+          nextStatus != SubscriptionPurchaseStatus.pending &&
+          nextStatus != null) {
+        if (nextStatus == SubscriptionPurchaseStatus.completed) {
+          _showSuccessDialog();
+        } else if (nextStatus == SubscriptionPurchaseStatus.failed) {
+          _showFailureDialog();
+        }
+      }
+    });
 
     return Scaffold(
       appBar: const CustomAppBar(
-        title: 'Top Up Tokens',
+        title: 'Subscribe',
         showBackButton: true,
       ),
-      body: state.isLoading && state.paymentMethods == null
-          ? const LoadingIndicator(message: 'Loading payment methods...')
+      body: state.isLoading && state.packages.isEmpty
+          ? const LoadingIndicator(message: 'Loading plans...')
           : Padding(
               padding: const EdgeInsets.all(20),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Enter Amount',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Choose a Plan',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  const Text(
+                    'You will receive an M-Pesa PIN prompt on your registered phone.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(child: _buildPackagesList(state)),
+                  const SizedBox(height: 16),
+                  _buildSubscribeButton(state),
+                  if (state.isPurchasingSubscription ||
+                      state.pendingPurchase?.status ==
+                          SubscriptionPurchaseStatus.pending)
+                    _buildStkWaitPanel(state),
+                  if (state.errorMessage != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        state.errorMessage!,
+                        style: const TextStyle(color: Colors.red),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _amountController,
-                      decoration: InputDecoration(
-                        hintText: 'Enter amount in KES',
-                        prefixText: 'KES ',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        errorText: AmountInput.dirty(_amountController.text)
-                            .error,
-                      ),
-                      keyboardType: TextInputType.number,
-                      onChanged: (value) {
-                        setState(() {});
-                      },
-                      validator: (value) => AmountInput.dirty(value ?? '').error,
-                    ),
-                    const SizedBox(height: 30),
-                    const Text(
-                      'Select Payment Method',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _buildPaymentMethods(state),
-                    const Spacer(),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton(
-                        onPressed: state.isPurchasingTokens
-                            ? null
-                            : () {
-                                if (_formKey.currentState?.validate() == true) {
-                                  _proceedToPayment(state, notifier);
-                                }
-                              },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF00C853),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                        child: state.isPurchasingTokens
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                ),
-                              )
-                            : const Text(
-                                'PROCEED TO PAYMENT',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ),
             ),
     );
   }
 
-  Widget _buildPaymentMethods(WalletState state) {
-    final methods = state.paymentMethods ?? [];
-    final selectedMethod = state.selectedPaymentMethod;
-
-    if (methods.isEmpty) {
+  Widget _buildPackagesList(WalletState state) {
+    if (state.packages.isEmpty) {
       return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Text('No payment methods available'),
+        child: Text(
+          'No subscription plans available',
+          style: TextStyle(color: Colors.grey),
         ),
       );
     }
-
-    return Column(
-      children: methods.map((method) {
-        return Card(
-          margin: const EdgeInsets.only(bottom: 10),
-          child: _PaymentMethodRadio(
-            method: method,
-            isSelected: method.type == selectedMethod,
-            onSelected: (value) {
-              ref.read(walletNotifierProvider.notifier).selectPaymentMethod(value);
-            },
-          ),
-        );
-      }).toList(),
+    return ListView.separated(
+      itemCount: state.packages.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (context, i) {
+        final pkg = state.packages[i];
+        final isSelected = state.selectedPackageId == pkg.id;
+        return _buildPackageCard(pkg, isSelected);
+      },
     );
   }
 
-  Future<void> _proceedToPayment(WalletState state, WalletNotifier notifier) async {
-    final amount = double.tryParse(_amountController.text) ?? 0.0;
-    final method = state.selectedPaymentMethod;
-
-    // Validate method is selected
-    if (method.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select a payment method'),
-          backgroundColor: Colors.red,
+  Widget _buildPackageCard(SubscriptionPackage pkg, bool isSelected) {
+    return InkWell(
+      onTap: () =>
+          ref.read(walletNotifierProvider.notifier).selectPackage(pkg.id),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFF00C853).withValues(alpha: 0.08)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected
+                ? const Color(0xFF00C853)
+                : Colors.grey.shade300,
+            width: isSelected ? 2 : 1,
+          ),
         ),
-      );
-      return;
-    }
-
-    // Show confirmation dialog and wait for result
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Confirm Payment'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Text('Amount: ${Formatters.formatCurrency(amount)}'),
-            Text('Method: ${_getMethodDisplayName(method)}'),
-            const SizedBox(height: 20),
-            const Text(
-              'Are you sure you want to proceed with this payment?',
-              style: TextStyle(color: Colors.grey),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00C853).withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                pkg.type == SubscriptionType.unlimited
+                    ? Icons.all_inclusive
+                    : Icons.confirmation_number,
+                color: const Color(0xFF00C853),
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    pkg.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                  if (pkg.description != null && pkg.description!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        pkg.description!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  'KES ${pkg.price}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Color(0xFF00C853),
+                  ),
+                ),
+                if (isSelected)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Icon(
+                      Icons.check_circle,
+                      color: Color(0xFF00C853),
+                      size: 18,
+                    ),
+                  ),
+              ],
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00C853),
-            ),
-            child: const Text('Confirm'),
-          ),
-        ],
       ),
     );
-
-    if (confirmed != true || !mounted) return;
-
-    // Execute purchase
-    await notifier.purchaseTokens(
-      amount: amount,
-      paymentMethod: method,
-    );
-
-    // Check result
-    if (!mounted) return;
-    
-    // Refresh state to get updated pendingTransaction
-    final updatedState = ref.read(walletNotifierProvider);
-    if (updatedState.pendingTransaction != null) {
-      _showPaymentInstructions(updatedState);
-    }
   }
 
-  String _getMethodDisplayName(String type) {
-    switch (type) {
-      case 'MPESA_TILL':
-        return 'M-Pesa Till Number';
-      case 'MPESA_PAYBILL':
-        return 'M-Pesa PayBill';
-      case 'AIRTIME':
-        return 'Airtime Transfer';
-      default:
-        return type;
-    }
-  }
+  Widget _buildSubscribeButton(WalletState state) {
+    final hasSelection = state.selectedPackageId != null;
+    final disabled =
+        !hasSelection || state.isPurchasingSubscription || state.isConfirmingPayment;
 
-  void _showPaymentInstructions(WalletState state) {
-    final transaction = state.pendingTransaction;
-    final method = state.selectedPaymentMethod;
-
-    String instructions = '';
-
-    switch (method) {
-      case 'MPESA_TILL':
-        instructions = '1. Go to M-Pesa on your phone\n'
-            '2. Select "Lipa Na M-Pesa"\n'
-            '3. Enter Till Number: 123456\n'
-            '4. Enter Account No: ${transaction?.reference}\n'
-            '5. Enter Amount: ${_amountController.text}\n'
-            '6. Enter your M-Pesa PIN\n'
-            '7. Wait for confirmation';
-        break;
-      case 'MPESA_PAYBILL':
-        instructions = '1. Go to M-Pesa on your phone\n'
-            '2. Select "Pay Bill"\n'
-            '3. Enter Business No: 987654\n'
-            '4. Enter Account No: ${transaction?.reference}\n'
-            '5. Enter Amount: ${_amountController.text}\n'
-            '6. Enter your M-Pesa PIN\n'
-            '7. Wait for confirmation';
-        break;
-      case 'AIRTIME':
-        instructions = '1. Dial *144# on your phone\n'
-            '2. Select "Airtime Transfer"\n'
-            '3. Enter Agent No: 0712345678\n'
-            '4. Enter Amount: ${_amountController.text}\n'
-            '5. Confirm transaction\n'
-            '6. Wait for confirmation';
-        break;
-    }
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Payment Instructions'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Please follow these steps to complete your payment:',
-                style: TextStyle(fontWeight: FontWeight.bold),
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton(
+        onPressed: disabled ? null : () => _initiateSubscribe(state),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF00C853),
+          disabledBackgroundColor: Colors.grey.shade300,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        child: state.isPurchasingSubscription
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : const Text(
+                'SUBSCRIBE',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
               ),
-              const SizedBox(height: 20),
-              Text(instructions),
-              const SizedBox(height: 20),
-              const Text(
-                'Once payment is complete, click "I have paid" below.',
-                style: TextStyle(color: Colors.grey, fontSize: 12),
+      ),
+    );
+  }
+
+  /// Q8b path (ii): spinner + waiting message; after 15s, "I have paid" appears.
+  Widget _buildStkWaitPanel(WalletState state) {
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orange.shade200),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor:
+                      AlwaysStoppedAnimation<Color>(Colors.orange),
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Check your phone for the M-Pesa PIN prompt. '
+                  'Enter your PIN to confirm the payment.',
+                  style: TextStyle(fontSize: 13),
+                ),
               ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              if (transaction != null) {
-                _confirmPayment(transaction.id);
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00C853),
+          if (_showManualConfirm && state.pendingPurchase != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: state.isConfirmingPayment
+                    ? null
+                    : () => _onManualConfirm(state),
+                icon: state.isConfirmingPayment
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.check, color: Colors.orange),
+                label: const Text(
+                  'I have paid',
+                  style: TextStyle(color: Colors.orange),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Colors.orange),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
             ),
-            child: const Text('I have paid'),
-          ),
+          ],
         ],
       ),
     );
   }
 
-  Future<void> _confirmPayment(String transactionId) async {
-    final notifier = ref.read(walletNotifierProvider.notifier);
-    await notifier.confirmPayment(transactionId);
+  Future<void> _initiateSubscribe(WalletState state) async {
+    final packageId = state.selectedPackageId;
+    if (packageId == null) return;
+
+    // Reset the manual-confirm timer state.
+    _manualConfirmTimer?.cancel();
+    setState(() => _showManualConfirm = false);
+
+    await ref
+        .read(walletNotifierProvider.notifier)
+        .purchaseSubscription(packageId: packageId);
 
     if (!mounted) return;
 
-    // Get updated state
-    final state = ref.read(walletNotifierProvider);
-    final transaction = state.transactions?.firstWhere(
-      (t) => t.id == transactionId,
-    );
-
-    if (transaction == null) {
-      _showTransactionNotFoundDialog();
-      return;
-    }
-
-    if (transaction.status == WalletTransactionStatus.success) {
-      _showSuccessDialog();
-    } else if (transaction.status == WalletTransactionStatus.failed) {
-      _showFailureDialog();
-    }
+    // Start the 15-second fallback timer.
+    _manualConfirmTimer = Timer(const Duration(seconds: 15), () {
+      if (mounted) {
+        setState(() => _showManualConfirm = true);
+      }
+    });
   }
 
-  void _showTransactionNotFoundDialog() {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Icon(
-          Icons.warning,
-          size: 60,
-          color: Colors.orange,
-        ),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Transaction Not Found',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Unable to find the transaction. Please check your transaction history.',
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              if (mounted) context.pop();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00C853),
-            ),
-            child: const Text('Back to Wallet'),
-          ),
-        ],
-      ),
-    );
+  Future<void> _onManualConfirm(WalletState state) async {
+    final purchase = state.pendingPurchase;
+    if (purchase == null) return;
+    await ref
+        .read(walletNotifierProvider.notifier)
+        .confirmPayment(purchase.id);
   }
 
   void _showSuccessDialog() {
@@ -412,15 +368,12 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Payment Successful!',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
+              'Subscription Active!',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             SizedBox(height: 10),
             Text(
-              'Your tokens have been added to your wallet.',
+              'Your plan is now active. You can return to the wallet.',
               textAlign: TextAlign.center,
             ),
           ],
@@ -432,7 +385,6 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
                 Navigator.pop(dialogContext);
                 if (mounted) {
                   context.pop(); // Close top-up screen
-                  context.push('/wallet'); // Go to wallet
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -450,20 +402,13 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Icon(
-          Icons.error,
-          size: 60,
-          color: Colors.red,
-        ),
+        title: const Icon(Icons.error, size: 60, color: Colors.red),
         content: const Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               'Payment Failed',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             SizedBox(height: 10),
             Text(
@@ -490,113 +435,5 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _amountController.dispose();
-    super.dispose();
-  }
-}
-
-class _PaymentMethodRadio extends StatelessWidget {
-  final PaymentMethod method;
-  final bool isSelected;
-  final ValueChanged<String> onSelected;
-
-  const _PaymentMethodRadio({
-    required this.method,
-    required this.isSelected,
-    required this.onSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () {
-        onSelected(method.type);
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          color: isSelected 
-              ? const Color(0xFF00C853).withValues(alpha: 0.05)
-              : null,
-        ),
-        child: Row(
-          children: [
-            // Radio button
-            Radio<String>(
-              value: method.type,
-              groupValue: isSelected ? method.type : null,
-              onChanged: (value) {
-                if (value != null) {
-                  onSelected(value);
-                }
-              },
-              activeColor: const Color(0xFF00C853),
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            const SizedBox(width: 12),
-            // Icon
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: const Color(0xFF00C853).withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                _getPaymentMethodIcon(method.type),
-                color: const Color(0xFF00C853),
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 12),
-            // Text content
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    method.displayName,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w500,
-                      fontSize: 16,
-                    ),
-                  ),
-                  if (method.description.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        method.description,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  IconData _getPaymentMethodIcon(String type) {
-    switch (type) {
-      case 'MPESA_TILL':
-      case 'MPESA_PAYBILL':
-        return Icons.phone_android;
-      case 'AIRTIME':
-        return Icons.phone;
-      case 'BANK_TRANSFER':
-        return Icons.account_balance;
-      default:
-        return Icons.payment;
-    }
   }
 }

@@ -1,3 +1,6 @@
+// bingwa-pro-backend/src/auth/dto/login-response.dto.ts
+// W1: tokenBalance dropped from agent block. Clients fetch balance via
+// /wallet/balance which now returns plan-based state.
 export class LoginResponseDto {
   accessToken: string;
   refreshToken: string;
@@ -8,12 +11,6 @@ export class LoginResponseDto {
     phoneNumber: string;
     email: string;
     status: string;
-    tokenBalance: number;
-    // Add these if you want them in the response
-    tillNumber?: string;
-    paybillNumber?: string;
-    tillNumberVerified?: boolean;
-    tillNumberStatus?: string;
   };
   requiresBiometricSetup: boolean;
 }
