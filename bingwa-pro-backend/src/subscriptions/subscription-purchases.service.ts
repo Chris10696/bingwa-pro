@@ -1,7 +1,6 @@
 // bingwa-pro-backend/src/subscriptions/subscription-purchases.service.ts
-// W1 new service. Manages the purchase-only audit trail. recordPurchase is
-// the entry point for W2's STK-callback success path; in W1 the only caller
-// is the (stubbed) mpesa.creditTokensToWallet.
+// W2.B: added findByPaymentReference — the join lookup used by MpesaService's
+// grant path (paymentReference == checkoutRequestId). Rest unchanged.
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -32,6 +31,12 @@ export class SubscriptionPurchasesService {
 
   async findOne(id: string): Promise<SubscriptionPurchase | null> {
     return this.purchasesRepository.findOne({ where: { id } });
+  }
+
+  async findByPaymentReference(
+    paymentReference: string,
+  ): Promise<SubscriptionPurchase | null> {
+    return this.purchasesRepository.findOne({ where: { paymentReference } });
   }
 
   async recordPurchase(data: {

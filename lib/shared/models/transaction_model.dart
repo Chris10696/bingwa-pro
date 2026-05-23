@@ -1,50 +1,50 @@
 // lib/shared/models/transaction_model.dart
-// W1 edits:
-//   - TransactionType enum: drop airtime/bundle; rename token_purchase → subscription_purchase
-//   - Field renames on all classes: productId → offerId, productName → offerName
-//   - Drop bundleSize everywhere
-//   - Add subscriptionPlanId to TransactionDetails and Transaction (Q5 lock)
-//   - Drop embedded ProductBundle class (moved to offer_model.dart as Offer)
-//   - Update TransactionResponseExtension to not sniff product names (was already broken)
+// W2.A: TransactionType + TransactionStatus replaced with Hybrid values
+// (uppercase @JsonValue matching backend). createTransactionFilter() rewritten
+// for new statuses. TransactionResponseExtension default type → quickDial.
+// Added QuickDialRequest + ScheduleTransactionRequest.
 import 'package:freezed_annotation/freezed_annotation.dart';
 part 'transaction_model.freezed.dart';
 part 'transaction_model.g.dart';
 
-// Transaction Types per primer locked list (DATA, MINUTES, SMS,
-// SUBSCRIPTION_PURCHASE, COMMISSION). AIRTIME and BUNDLE dropped.
+// Hybrid's 6 trigger-source types (matches backend exactly).
 enum TransactionType {
-  @JsonValue('data')
-  data,
-  @JsonValue('minutes')
-  minutes,
-  @JsonValue('sms')
-  sms,
-  @JsonValue('subscription_purchase')
-  subscriptionPurchase,
-  @JsonValue('commission')
-  commission,
+  @JsonValue('TILL')
+  till,
+  @JsonValue('MPESA')
+  mpesa,
+  @JsonValue('SITE_LINK')
+  siteLink,
+  @JsonValue('SUBSCRIPTION_RENEWAL')
+  subscriptionRenewal,
+  @JsonValue('QUICK_DIAL')
+  quickDial,
+  @JsonValue('AIRTIME_BALANCE_CHECK')
+  airtimeBalanceCheck,
 }
 
-// Transaction Status — unchanged.
+// Hybrid's 10-state lifecycle (matches backend exactly).
 enum TransactionStatus {
-  @JsonValue('initiated')
-  initiated,
-  @JsonValue('validated')
-  validated,
-  @JsonValue('executing')
-  executing,
-  @JsonValue('success')
+  @JsonValue('UNMATCHED')
+  unmatched,
+  @JsonValue('SCHEDULED')
+  scheduled,
+  @JsonValue('PROCESSING')
+  processing,
+  @JsonValue('SUCCESS')
   success,
-  @JsonValue('failed')
+  @JsonValue('FAILED')
   failed,
-  @JsonValue('aborted')
-  aborted,
-  @JsonValue('pending')
-  pending,
-  @JsonValue('refunded')
-  refunded,
-  @JsonValue('disputed')
-  disputed,
+  @JsonValue('FAILED_ALREADY_RECOMMENDED')
+  failedAlreadyRecommended,
+  @JsonValue('FAILED_OFFER_DEACTIVATED')
+  failedOfferDeactivated,
+  @JsonValue('RESCHEDULED')
+  rescheduled,
+  @JsonValue('PAUSED')
+  paused,
+  @JsonValue('BLOCKED')
+  blocked,
 }
 
 // USSD Status — unchanged.
@@ -261,6 +261,49 @@ abstract class RetryRequest with _$RetryRequest {
       _$RetryRequestFromJson(json);
 }
 
+// W2.D: Quick Dial — minimal body for POST /transactions.
+@freezed
+abstract class QuickDialRequest with _$QuickDialRequest {
+  const factory QuickDialRequest({
+    required String offerId,
+    required String customerPhone,
+  }) = _QuickDialRequest;
+  factory QuickDialRequest.fromJson(Map<String, dynamic> json) =>
+      _$QuickDialRequestFromJson(json);
+}
+
+// W2.F: schedule an offer (auto-renewal) — body for POST /transactions/schedule.
+@freezed
+abstract class ScheduleTransactionRequest with _$ScheduleTransactionRequest {
+  const factory ScheduleTransactionRequest({
+    required String offerId,
+    required String customerPhone,
+    required String scheduledFor, // ISO8601
+    required bool isRecurring,
+    int? daysToRecur,
+  }) = _ScheduleTransactionRequest;
+  factory ScheduleTransactionRequest.fromJson(Map<String, dynamic> json) =>
+      _$ScheduleTransactionRequestFromJson(json);
+}
+
+// W2.F: a scheduled transaction row (subset of TransactionDetails the
+// auto-renewals UI needs).
+@freezed
+abstract class ScheduledTransaction with _$ScheduledTransaction {
+  const factory ScheduledTransaction({
+    required String id,
+    required String agentId,
+    String? offerId,
+    String? offerName,
+    required String customerPhone,
+    required double amount,
+    Map<String, dynamic>? rescheduleInfo,
+    required DateTime createdAt,
+  }) = _ScheduledTransaction;
+  factory ScheduledTransaction.fromJson(Map<String, dynamic> json) =>
+      _$ScheduledTransactionFromJson(json);
+}
+
 // USSD Health Check — unchanged (kept intact per Q3 default).
 @freezed
 abstract class UssdHealthCheck with _$UssdHealthCheck {
@@ -308,7 +351,10 @@ extension TransactionDetailsExtension on TransactionDetails {
 // extension after transaction_execution_provider is deleted; kept as a
 // no-op shim so any stragglers compile, with type defaulting to .data.
 extension TransactionResponseExtension on TransactionResponse {
-  Transaction toTransaction({String? agentId, TransactionType type = TransactionType.data}) {
+  Transaction toTransaction({
+    String? agentId,
+    TransactionType type = TransactionType.quickDial, // was .data
+  }) {
     return Transaction(
       id: transactionId,
       type: type,
@@ -374,13 +420,18 @@ TransactionFilter createTransactionFilter({
   if (filter == 'success') {
     statuses = [TransactionStatus.success];
   } else if (filter == 'failed') {
-    statuses = [TransactionStatus.failed, TransactionStatus.aborted];
+    statuses = [
+      TransactionStatus.failed,
+      TransactionStatus.failedAlreadyRecommended,
+      TransactionStatus.failedOfferDeactivated,
+      TransactionStatus.blocked,
+    ];
   } else if (filter == 'pending') {
     statuses = [
-      TransactionStatus.pending,
-      TransactionStatus.initiated,
-      TransactionStatus.validated,
-      TransactionStatus.executing,
+      TransactionStatus.scheduled,
+      TransactionStatus.processing,
+      TransactionStatus.rescheduled,
+      TransactionStatus.paused,
     ];
   }
   DateTime? startDate;

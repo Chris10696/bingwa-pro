@@ -1,6 +1,7 @@
 // bingwa-pro-backend/src/offers/dto/update-offer.dto.ts
-// W1: renamed from UpdateProductDto. PartialType supports toggle-only and
-// full updates from the same PATCH /offers/:id endpoint (Q10).
+// W2.A: structurally unchanged — PartialType(CreateOfferDto) auto-follows the
+// create DTO's W2 reshape. Supports toggle-only ({isActive}) and full edits
+// from the same PATCH /offers/:id endpoint.
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateOfferDto } from './create-offer.dto';
 

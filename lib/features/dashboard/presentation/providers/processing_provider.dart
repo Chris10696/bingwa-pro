@@ -8,7 +8,6 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../wallet/presentation/providers/wallet_provider.dart';
-import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../../core/utils/logger.dart';
 
 // ============================================================
@@ -116,20 +115,13 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
 
   ProcessingNotifier(this._ref) : super(ProcessingState());
 
-  Future<void> startProcessing() async {
+Future<void> startProcessing() async {
     try {
-      final authState = _ref.read(authNotifierProvider);
-      final agent = authState.agent;
-      if (agent?.tillNumber == null && agent?.paybillNumber == null) {
-        state = state.copyWith(
-          lastError: 'Please set up your payment method first',
-        );
-        _showPaymentSetupRequired();
-        return;
-      }
+      // W2.A (Flag A): removed dead till/paybill guard — those fields are
+      // dropped (D-W2-4). Payment-method setup is no longer a precondition;
+      // SIM-based identity (W4) replaces it.
 
-      // W1: plan check via hasUsableTokens instead of token-balance arithmetic.
-      // Skipped entirely in test mode.
+      // W1: plan check via hasUsableTokens. Skipped in test mode.
       if (!kTestMode) {
         final walletState = _ref.read(walletNotifierProvider);
         final hasUsable = walletState.balance?.hasUsableTokens ?? false;
@@ -143,7 +135,6 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
       } else {
         AppLogger.d('[TEST MODE] Plan check bypassed for startProcessing');
       }
-
       state = state.copyWith(
         status: ProcessingStatus.running,
         startedAt: DateTime.now(),

@@ -20,7 +20,7 @@ class AgentMapper {
       email: authProfile.email,
       status: status,
       tokenBalance: authProfile.tokenBalance,
-      registeredAt: authProfile.registeredAt,
+      registeredAt: authProfile.registeredAt ?? DateTime.now(),
       lastLoginAt: authProfile.lastLoginAt,
       nationalId: authProfile.nationalId,
       agentCode: authProfile.agentCode,

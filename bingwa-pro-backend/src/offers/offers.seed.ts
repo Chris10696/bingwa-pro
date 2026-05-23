@@ -1,143 +1,51 @@
 // bingwa-pro-backend/src/offers/offers.seed.ts
-// W1: rewritten with Hybrid-style offer data. USSD templates use the BH
-// placeholder format from FormatUssdUseCase. Source data: Hybrid APK
-// quick_dial_screen.dart mockProducts (matching Image 2 of the Hybrid UI).
-// agentId is set to a system-seed sentinel; in production these would belong
-// to a real agent. Seeds only Data offers since they're the only category with
-// confirmed Hybrid codes; Minutes/SMS offers come from agents in W2.
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+// W2.A: repurposed from an auto-running OnModuleInit seed into a plain data
+// source + clone helper. Per Q-W2-17 / D-W2-D, every new agent gets these 8
+// default Data offers cloned at registration. validityLabel + categoryName
+// dropped; type is OfferType.DATA. Prices for "1GB - 24 Hrs" (99) and
+// "1.25GB - Until Midnight" (55) corrected against the Hybrid My Offers
+// screenshots — the W1 seed had 50/30 which did not match the app.
 import { Repository } from 'typeorm';
-import { Offer } from './entities/offer.entity';
-import { Category } from '../categories/entities/category.entity';
+import { Offer, OfferType } from './entities/offer.entity';
 
-// System sentinel for seed-owned offers. W2 will introduce per-agent ownership.
-const SEED_AGENT_ID = '00000000-0000-0000-0000-000000000000';
-
-interface SeedOfferRow {
+export interface DefaultOfferRow {
   name: string;
-  ussdTemplate: string;
+  ussdCode: string;
   price: number;
-  validityLabel: string;
-  categoryName: string; // resolved to categoryId at seed time
+  type: OfferType;
 }
 
-const seedOffers: SeedOfferRow[] = [
-  // Data offers — codes verified from Hybrid Image 2 / quick_dial_screen.dart
-  {
-    name: '1.5 GB - 3 Hrs',
-    ussdTemplate: '*180*5*2*BH*1*1#',
-    price: 50,
-    validityLabel: '3 Hrs',
-    categoryName: 'Data',
-  },
-  {
-    name: '350 MBS - 7 Days',
-    ussdTemplate: '*180*5*2*BH*2*1#',
-    price: 49,
-    validityLabel: '7 Days',
-    categoryName: 'Data',
-  },
-  {
-    name: '2.5GB - 7 Days',
-    ussdTemplate: '*180*5*2*BH*3*1#',
-    price: 300,
-    validityLabel: '7 Days',
-    categoryName: 'Data',
-  },
-  {
-    name: '6GB - 7 Days',
-    ussdTemplate: '*180*5*2*BH*4*1#',
-    price: 700,
-    validityLabel: '7 Days',
-    categoryName: 'Data',
-  },
-  {
-    name: '1GB - 1Hr',
-    ussdTemplate: '*180*5*2*BH*5*1#',
-    price: 19,
-    validityLabel: '1Hr',
-    categoryName: 'Data',
-  },
-  {
-    name: '250MBS - 24 Hrs',
-    ussdTemplate: '*180*5*2*BH*6*1#',
-    price: 20,
-    validityLabel: '24 Hrs',
-    categoryName: 'Data',
-  },
-  {
-    name: '1GB - 24 Hrs',
-    ussdTemplate: '*180*5*2*BH*7*1#',
-    price: 50,
-    validityLabel: '24 Hrs',
-    categoryName: 'Data',
-  },
-  {
-    name: '1.25GB - Until Midnight',
-    ussdTemplate: '*180*5*2*BH*8*1#',
-    price: 30,
-    validityLabel: 'Until Midnight',
-    categoryName: 'Data',
-  },
+// The 8 Hybrid default Data offers (Hybrid "My Offers" screen).
+export const DEFAULT_OFFERS: DefaultOfferRow[] = [
+  { name: '1.5 GB - 3 Hrs', ussdCode: '*180*5*2*BH*1*1#', price: 50, type: OfferType.DATA },
+  { name: '350 MBS - 7 Days', ussdCode: '*180*5*2*BH*2*1#', price: 49, type: OfferType.DATA },
+  { name: '2.5GB - 7 Days', ussdCode: '*180*5*2*BH*3*1#', price: 300, type: OfferType.DATA },
+  { name: '6GB - 7 Days', ussdCode: '*180*5*2*BH*4*1#', price: 700, type: OfferType.DATA },
+  { name: '1GB - 1Hr', ussdCode: '*180*5*2*BH*5*1#', price: 19, type: OfferType.DATA },
+  { name: '250MBS - 24 Hrs', ussdCode: '*180*5*2*BH*6*1#', price: 20, type: OfferType.DATA },
+  { name: '1GB - 24 Hrs', ussdCode: '*180*5*2*BH*7*1#', price: 99, type: OfferType.DATA },
+  { name: '1.25GB - Until Midnight', ussdCode: '*180*5*2*BH*8*1#', price: 55, type: OfferType.DATA },
 ];
 
-@Injectable()
-export class OffersSeed implements OnModuleInit {
-  private readonly logger = new Logger(OffersSeed.name);
-
-  constructor(
-    @InjectRepository(Offer)
-    private offersRepository: Repository<Offer>,
-    @InjectRepository(Category)
-    private categoriesRepository: Repository<Category>,
-  ) {}
-
-  async onModuleInit() {
-    await this.seed();
-  }
-
-  async seed() {
-    const existingCount = await this.offersRepository.count();
-    if (existingCount > 0) {
-      this.logger.log(
-        `Offers table already populated (${existingCount} rows). Skipping seed.`,
-      );
-      return;
-    }
-
-    // Resolve category names to IDs
-    const categories = await this.categoriesRepository.find();
-    if (categories.length === 0) {
-      this.logger.warn(
-        'No categories found; cannot seed offers. Run CategoriesSeed first.',
-      );
-      return;
-    }
-    const categoryByName = new Map(categories.map((c) => [c.name, c.id]));
-
-    const rowsToInsert = seedOffers
-      .map((row) => {
-        const categoryId = categoryByName.get(row.categoryName);
-        if (!categoryId) {
-          this.logger.warn(
-            `Category "${row.categoryName}" not found, skipping offer "${row.name}"`,
-          );
-          return null;
-        }
-        return this.offersRepository.create({
-          name: row.name,
-          ussdTemplate: row.ussdTemplate,
-          price: row.price,
-          validityLabel: row.validityLabel,
-          categoryId,
-          agentId: SEED_AGENT_ID,
-          isActive: true,
-        });
-      })
-      .filter((x): x is Offer => x !== null);
-
-    await this.offersRepository.save(rowsToInsert);
-    this.logger.log(`Seeded ${rowsToInsert.length} offers.`);
-  }
+/**
+ * Clones the default offers into a new agent's account. Called from
+ * AuthService.register() inside the registration transaction (D-W2-D). Pass a
+ * repository bound to the active query-runner manager so the inserts
+ * participate in that transaction.
+ */
+export async function cloneDefaultOffersForAgent(
+  offersRepository: Repository<Offer>,
+  agentId: string,
+): Promise<void> {
+  const rows = DEFAULT_OFFERS.map((row) =>
+    offersRepository.create({
+      name: row.name,
+      ussdCode: row.ussdCode,
+      price: row.price,
+      type: row.type,
+      agentId,
+      isActive: true,
+    }),
+  );
+  await offersRepository.save(rows);
 }

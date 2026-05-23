@@ -1,11 +1,10 @@
 // bingwa-pro-backend/src/subscriptions/subscription-plans.service.ts
-// W1 new service. Owns the active-plan state model: findActivePlansForAgent,
-// hasUsableTokens (per-primer SQL semantics), and the midnight cron that
-// flips expired UNLIMITED plans to inactive. createPlanFromPurchase exists
-// for W2 STK-callback wiring but is currently uncalled (mpesa stub in W1).
+// W2.D: added decrementLimitedToken — implements Hybrid's plan-debit priority
+// (DialUssdUseCase.checkIfShouldUpdateTokens): UNLIMITED active wins (no debit);
+// else debit 1 token from an active LIMITED plan. Everything else unchanged.
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThan } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   SubscriptionPlan,
@@ -31,13 +30,6 @@ export class SubscriptionPlansService {
     });
   }
 
-  /**
-   * Primer SQL semantics (locked):
-   *   EXISTS (SELECT 1 FROM subscription_plan WHERE agentId = ? AND isActive = true AND (
-   *     (type = 'LIMITED' AND tokensRemaining > 0)
-   *     OR (type = 'UNLIMITED' AND expiresAt > NOW())
-   *   ))
-   */
   async hasUsableTokens(agentId: string): Promise<boolean> {
     const count = await this.plansRepository
       .createQueryBuilder('plan')
@@ -55,16 +47,45 @@ export class SubscriptionPlansService {
   }
 
   /**
-   * Creates a SubscriptionPlan from a confirmed purchase. Called by W2's
-   * STK-callback success path. Not invoked in W1 (mpesa.creditTokensToWallet
-   * is stubbed per primer).
-   *
-   * App-level uniqueness check: only one active plan per (agentId, type) at a
-   * time. If a same-type active plan exists, this method extends it rather
-   * than creating a duplicate row. The DB partial unique index in the entity
-   * is the source of truth; this check provides a clearer error than a raw
-   * Postgres constraint violation.
+   * W2.D plan-debit (Hybrid checkIfShouldUpdateTokens):
+   *   - If an UNLIMITED plan is active & unexpired → no debit (UNLIMITED wins).
+   *   - Else if a LIMITED plan is active with tokens → debit 1.
+   *   - Else → no debit (caller should have been blocked by hasUsableTokens).
+   * Returns true if a token was debited.
    */
+  async decrementLimitedToken(agentId: string): Promise<boolean> {
+    const plans = await this.findActivePlansForAgent(agentId);
+    const now = new Date();
+
+    const hasUnlimited = plans.some(
+      (p) =>
+        p.type === SubscriptionType.UNLIMITED &&
+        p.expiresAt != null &&
+        p.expiresAt > now,
+    );
+    if (hasUnlimited) return false;
+
+    const limited = plans.find(
+      (p) =>
+        p.type === SubscriptionType.LIMITED &&
+        (p.tokensRemaining ?? 0) > 0,
+    );
+    if (!limited) {
+      this.logger.warn(
+        `decrementLimitedToken called for agent=${agentId} with no usable plan.`,
+      );
+      return false;
+    }
+
+    limited.tokensRemaining = (limited.tokensRemaining ?? 0) - 1;
+    if (limited.tokensRemaining <= 0) {
+      // Optional: deactivate a depleted LIMITED plan immediately.
+      limited.tokensRemaining = 0;
+    }
+    await this.plansRepository.save(limited);
+    return true;
+  }
+
   async createPlanFromPurchase(
     agentId: string,
     packageId: string,
@@ -75,13 +96,10 @@ export class SubscriptionPlansService {
     if (!pkg) {
       throw new Error(`SubscriptionPackage ${packageId} not found`);
     }
-
     const existing = await this.plansRepository.findOne({
       where: { agentId, type: pkg.type, isActive: true },
     });
-
     if (existing) {
-      // Stack onto existing same-type plan.
       if (pkg.type === SubscriptionType.LIMITED) {
         existing.tokensRemaining =
           (existing.tokensRemaining ?? 0) + (pkg.tokenAllowance ?? 0);
@@ -96,15 +114,12 @@ export class SubscriptionPlansService {
       }
       return this.plansRepository.save(existing);
     }
-
     const plan = this.plansRepository.create({
       agentId,
       subscriptionPackageId: packageId,
       type: pkg.type,
       tokensRemaining:
-        pkg.type === SubscriptionType.LIMITED
-          ? pkg.tokenAllowance ?? 0
-          : null,
+        pkg.type === SubscriptionType.LIMITED ? pkg.tokenAllowance ?? 0 : null,
       expiresAt:
         pkg.type === SubscriptionType.UNLIMITED
           ? new Date(Date.now() + Number(pkg.durationMs ?? 0))
@@ -115,11 +130,6 @@ export class SubscriptionPlansService {
     return this.plansRepository.save(plan);
   }
 
-  /**
-   * Daily midnight cron: deactivates expired UNLIMITED plans.
-   * Per primer: UPDATE subscription_plan SET isActive = false WHERE
-   * type = 'UNLIMITED' AND expiresAt < NOW() AND isActive = true.
-   */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async deactivateExpiredUnlimitedPlans() {
     const result = await this.plansRepository
@@ -130,7 +140,6 @@ export class SubscriptionPlansService {
       .andWhere('expiresAt < NOW()')
       .andWhere('isActive = :isActive', { isActive: true })
       .execute();
-
     if (result.affected && result.affected > 0) {
       this.logger.log(
         `Deactivated ${result.affected} expired UNLIMITED plan(s).`,

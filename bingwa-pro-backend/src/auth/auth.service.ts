@@ -1,9 +1,8 @@
 // bingwa-pro-backend/src/auth/auth.service.ts
-// W1 ripple edit:
-//   register(): wallet creation no longer sets token-balance fields (they no
-//     longer exist on the entity). Sets only processingMode='express'.
-//   login(): response's agent block no longer includes tokenBalance. Agents
-//     read balance from /wallet/balance instead.
+// W2.B: register() now clones the 8 default offers into the new agent's
+// account inside the same transaction (D-W2-D). If cloning fails, the whole
+// registration rolls back (atomicity — confirmed: every agent always has the
+// 8 defaults). login() unchanged from W1.
 import {
   Injectable,
   ConflictException,
@@ -15,6 +14,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Agent, AgentStatus } from '../agents/entities/agent.entity';
 import { Wallet, ProcessingMode } from '../wallets/entities/wallet.entity';
+import { Offer } from '../offers/entities/offer.entity';
+import { cloneDefaultOffersForAgent } from '../offers/offers.seed';
 import * as bcrypt from 'bcrypt';
 import { RegisterAgentDto } from './dto/register-agent.dto';
 import { JwtService } from '@nestjs/jwt';
@@ -41,20 +42,17 @@ export class AuthService {
     if (existingAgent) {
       throw new ConflictException('Phone number already registered');
     }
-
     const existingId = await this.agentsRepository.findOne({
       where: { nationalId: registerDto.nationalId },
     });
     if (existingId) {
       throw new ConflictException('National ID already registered');
     }
-
     if (registerDto.pin !== registerDto.confirmPin) {
       throw new BadRequestException('PIN and confirmation do not match');
     }
 
-    const saltRounds = 10;
-    const hashedPin = await bcrypt.hash(registerDto.pin, saltRounds);
+    const hashedPin = await bcrypt.hash(registerDto.pin, 10);
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -74,14 +72,16 @@ export class AuthService {
       agent.platform = registerDto.platform || 'android';
       const savedAgent = await queryRunner.manager.save(agent);
 
-      // W1: wallet creation no longer initializes token fields. Only
-      // processingMode is set (defaults to EXPRESS but written explicitly
-      // for clarity).
       const wallet = new Wallet();
       wallet.agent = savedAgent;
       wallet.agentId = savedAgent.id;
       wallet.processingMode = ProcessingMode.EXPRESS;
       await queryRunner.manager.save(wallet);
+
+      // D-W2-D: clone the 8 default offers inside this transaction. Uses a
+      // transaction-bound Offer repository so a failure rolls everything back.
+      const txnOfferRepo = queryRunner.manager.getRepository(Offer);
+      await cloneDefaultOffersForAgent(txnOfferRepo, savedAgent.id);
 
       await queryRunner.commitTransaction();
       return {
@@ -106,18 +106,15 @@ export class AuthService {
     if (!agent) {
       throw new UnauthorizedException('Invalid phone number or PIN');
     }
-
     if (agent.status !== AgentStatus.ACTIVE) {
       throw new UnauthorizedException(
         `Account is ${agent.status}. Please contact support.`,
       );
     }
-
     const isPinValid = await bcrypt.compare(loginDto.pin, agent.pinHash);
     if (!isPinValid) {
       throw new UnauthorizedException('Invalid phone number or PIN');
     }
-
     if (agent.deviceId !== loginDto.deviceId) {
       agent.deviceId = loginDto.deviceId;
       await this.agentsRepository.save(agent);
@@ -128,15 +125,11 @@ export class AuthService {
       phoneNumber: agent.phoneNumber,
       status: agent.status,
     };
-
     const accessToken = this.jwtService.sign(payload, { expiresIn: '7d' });
     const refreshToken = this.jwtService.sign(payload, { expiresIn: '30d' });
-
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    // W1: agent block no longer includes tokenBalance. Clients call
-    // /wallet/balance for balance state (now plan-based).
     return {
       accessToken,
       refreshToken,

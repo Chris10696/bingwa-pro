@@ -5,15 +5,15 @@ part 'auth_model.freezed.dart';
 part 'auth_model.g.dart';
 
 enum AgentAuthStatus {
-  @JsonValue('PENDING')
+  @JsonValue('pending')
   pending,
-  @JsonValue('ACTIVE')
+  @JsonValue('active')
   active,
-  @JsonValue('SUSPENDED')
+  @JsonValue('suspended')
   suspended,
-  @JsonValue('TERMINATED')
+  @JsonValue('terminated')
   terminated,
-  @JsonValue('PENDING_VERIFICATION')
+  @JsonValue('pending_verification')
   pendingVerification,
 }
 
@@ -47,21 +47,23 @@ abstract class LoginResponse with _$LoginResponse {
 }
 
 // ===== AGENT PROFILE - SINGLE SOURCE OF TRUTH =====
-// ALL FIELDS MUST BE NON-NULLABLE with defaults where appropriate
+// W2.A: tokenBalance defaulted (backend dropped it — was `required`, caused
+// getAgentProfile() to throw and dashboard profile to silently fail).
+// registeredAt made nullable (login response omits it). Till/paybill fields
+// kept as harmless nullable dead fields (D-W2-4 drops the concept, but
+// removing them ripples into screens deleted in Batch 4).
 @freezed
 abstract class AgentProfile with _$AgentProfile {
   const factory AgentProfile({
-    // Required fields - all non-nullable
     required String id,
     required String fullName,
     required String phoneNumber,
     required String email,
     @JsonKey(unknownEnumValue: AgentAuthStatus.pending)
     required AgentAuthStatus status,
-    required double tokenBalance,
-    required DateTime registeredAt,
-    
-    // Optional fields - nullable
+    @Default(0.0) double tokenBalance,
+    DateTime? registeredAt,
+
     DateTime? lastLoginAt,
     String? nationalId,
     String? agentCode,
@@ -70,8 +72,7 @@ abstract class AgentProfile with _$AgentProfile {
     double? totalCommission,
     int? totalTransactions,
     double? successRate,
-    
-    // ===== PAYMENT FIELDS - ALL NULLABLE =====
+
     String? tillNumber,
     String? paybillNumber,
     String? paybillAccount,
@@ -80,11 +81,9 @@ abstract class AgentProfile with _$AgentProfile {
     String? tillNumberStatus,
     String? defaultPaymentMethod,
     Map<String, dynamic>? paymentSettings,
-    // ========================================
-    
+
     Map<String, dynamic>? metadata,
   }) = _AgentProfile;
-
   factory AgentProfile.fromJson(Map<String, dynamic> json) =>
       _$AgentProfileFromJson(json);
 }

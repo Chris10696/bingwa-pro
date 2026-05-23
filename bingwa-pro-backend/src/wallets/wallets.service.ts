@@ -1,20 +1,19 @@
 // bingwa-pro-backend/src/wallets/wallets.service.ts
-// W1: rewritten. All token-balance arithmetic removed. /wallet/balance now
-// composes plans + hasUsableTokens from SubscriptionPlansService. The
-// purchase flow is stubbed for W1 — it records a PENDING purchase but does
-// NOT yet initiate STK push (W2 wiring through MpesaService).
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+// W2.B: purchaseSubscription now initiates a real STK push and links the
+// SubscriptionPurchase to the M-Pesa transaction via paymentReference ==
+// CheckoutRequestID. It records the purchase as PENDING; the plan is granted
+// later by MpesaService's callback/simulate grant path (NOT here — single
+// grant path). confirmPayment is now real. Added setProcessingMode (Q-W2-21).
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Wallet } from './entities/wallet.entity';
+import { Wallet, ProcessingMode } from './entities/wallet.entity';
 import { Agent } from '../agents/entities/agent.entity';
 import { SubscriptionPlansService } from '../subscriptions/subscription-plans.service';
 import { SubscriptionPurchasesService } from '../subscriptions/subscription-purchases.service';
 import { SubscriptionPackagesService } from '../subscriptions/subscription-packages.service';
+import { SubscriptionPurchaseStatus } from '../subscriptions/entities/subscription-purchase.entity';
+import { MpesaService } from '../mpesa/mpesa.service';
 
 @Injectable()
 export class WalletsService {
@@ -28,6 +27,7 @@ export class WalletsService {
     private subscriptionPlansService: SubscriptionPlansService,
     private subscriptionPurchasesService: SubscriptionPurchasesService,
     private subscriptionPackagesService: SubscriptionPackagesService,
+    private mpesaService: MpesaService,
   ) {}
 
   async getWalletByAgentId(agentId: string): Promise<Wallet> {
@@ -48,26 +48,16 @@ export class WalletsService {
     if (!agent) {
       throw new NotFoundException(`Agent ${agentId} not found`);
     }
-    const wallet = this.walletsRepository.create({
-      agent,
-      agentId,
-    });
+    const wallet = this.walletsRepository.create({ agent, agentId });
     return this.walletsRepository.save(wallet);
   }
 
-  /**
-   * Returns the composite balance payload per primer:
-   *   { hasUsableTokens, plans, wallet: {processingMode, isProcessing,
-   *     lifetimeTokensPurchased, lifetimeTokensConsumed} }
-   * Plans and hasUsableTokens are sourced from SubscriptionPlansService.
-   */
   async getBalance(agentId: string) {
     const wallet = await this.getWalletByAgentId(agentId);
     const plans =
       await this.subscriptionPlansService.findActivePlansForAgent(agentId);
     const hasUsableTokens =
       await this.subscriptionPlansService.hasUsableTokens(agentId);
-
     return {
       hasUsableTokens,
       plans,
@@ -81,31 +71,24 @@ export class WalletsService {
   }
 
   async getPurchases(agentId: string, limit: number, offset: number) {
-    return this.subscriptionPurchasesService.findByAgent(
-      agentId,
-      limit,
-      offset,
-    );
+    return this.subscriptionPurchasesService.findByAgent(agentId, limit, offset);
   }
 
   /**
-   * W1 stub: records a PENDING SubscriptionPurchase and returns its ID.
-   * The real STK-push flow lands in W2 when mpesa.creditTokensToWallet is
-   * unstubbed and wired through to SubscriptionPlansService.createPlanFromPurchase.
+   * W2.B: initiates a real STK push, then records a PENDING SubscriptionPurchase
+   * keyed by the Daraja CheckoutRequestID. Does NOT grant the plan — that
+   * happens on callback/simulate via MpesaService (single grant path). The
+   * client polls /mpesa/status/:checkoutRequestId until COMPLETED/FAILED.
    *
-   * For W1, agents see "purchase submitted" but no plan is granted. This
-   * matches primer's "Temporary regression accepted: between W1 ship and W2
-   * ship, agents have no way to execute a transaction."
+   * Q-W2-12: each call creates a new purchase row (new attempt = new row).
    */
   async purchaseSubscription(
     agentId: string,
     packageId: string,
     phoneNumber?: string,
   ) {
-    // Verify package exists (throws if not)
     const pkg = await this.subscriptionPackagesService.findOne(packageId);
 
-    // Use agent's registered phone if caller didn't override
     let stkPhone = phoneNumber;
     if (!stkPhone) {
       const agent = await this.agentsRepository.findOne({
@@ -113,56 +96,56 @@ export class WalletsService {
       });
       stkPhone = agent?.phoneNumber;
     }
+    if (!stkPhone) {
+      throw new NotFoundException('No phone number available for STK push');
+    }
+
+    // Daraja wants 2547######## (12-digit, no leading +). Convert 07######## .
+    const darajaPhone = this.toDarajaMsisdn(stkPhone);
+
+    // Initiate the STK push first so we have the real CheckoutRequestID to
+    // use as the purchase's paymentReference (the join key).
+    const stk = await this.mpesaService.initiateStkPush(
+      {
+        phoneNumber: darajaPhone,
+        amount: pkg.price,
+        accountReference: `BingwaPro-${agentId.slice(0, 8)}`,
+        transactionDesc: `Bingwa Pro: ${pkg.name}`,
+      },
+      agentId,
+    );
 
     const purchase = await this.subscriptionPurchasesService.recordPurchase({
       agentId,
       packageId: pkg.id,
       amountPaid: pkg.price,
-      paymentReference: `W1-STUB-${Date.now()}`, // W2: replaced by Daraja CheckoutRequestID
-      metadata: {
-        stkPhone,
-        note: 'SUBSCRIPTION_PURCHASE_PENDING_W2',
-      },
+      paymentReference: stk.checkoutRequestId, // join key to MpesaTransaction
+      status: SubscriptionPurchaseStatus.PENDING,
+      metadata: { stkPhone: darajaPhone, merchantRequestId: stk.merchantRequestId },
     });
 
     this.logger.log(
-      `SUBSCRIPTION_PURCHASE_PENDING_W2 — agent=${agentId} package=${pkg.name} amount=${pkg.price}`,
+      `STK initiated — agent=${agentId} package=${pkg.name} checkoutRequestId=${stk.checkoutRequestId}`,
     );
 
-    // TODO(wave-2): replace this stub with mpesaService.initiateStkPush(...)
-    // and return the real CheckoutRequestID. The current return shape is
-    // compatible — the client polls /wallet/purchases until status flips.
     return {
       purchaseId: purchase.id,
       packageName: pkg.name,
       amount: pkg.price,
-      stkPhone,
+      stkPhone: darajaPhone,
+      checkoutRequestId: stk.checkoutRequestId,
       status: purchase.status,
     };
   }
 
   /**
-   * W1 stub: manual payment confirmation. Returns synthetic data matching the
-   * PaymentConfirmation shape the client expects. Doesn't actually grant a plan
-   * (mpesa.creditTokensToWallet is stubbed).
-   *
-   * TODO(wave-2): real implementation should:
-   *   1. Look up SubscriptionPurchase by id, verify ownership by agentId
-   *   2. If status is COMPLETED, return its data
-   *   3. If status is PENDING, call mpesa.queryStatus and update accordingly
-   *   4. If status is FAILED, return failure shape
+   * W2.B: real manual-confirm fallback. Looks up the purchase; if PENDING,
+   * reconciles against the M-Pesa transaction via mpesa.queryStatus. Returns
+   * the current status so the client UI can resolve its spinner.
    */
   async confirmPayment(agentId: string, purchaseId: string) {
-    this.logger.log(
-      `SUBSCRIPTION_PAYMENT_CONFIRM_PENDING_W2 — agent=${agentId} purchase=${purchaseId}`,
-    );
-
-    // Verify the purchase exists and belongs to this agent.
     const purchase = await this.subscriptionPurchasesService.findOne(purchaseId);
     if (!purchase || purchase.agentId !== agentId) {
-      // Return a "still pending" shape rather than throwing — client treats
-      // non-SUCCESS as "still waiting" and keeps the spinner up. Throwing
-      // would crash the client's freezed deserialization.
       return {
         transactionId: purchaseId,
         reference: purchaseId,
@@ -171,12 +154,50 @@ export class WalletsService {
       };
     }
 
+    // If still pending, peek at the M-Pesa side. The callback may have already
+    // flipped it; if so, reflect that. (Grant still only happens in the grant
+    // path — this is read-only reconciliation.)
+    if (purchase.status === SubscriptionPurchaseStatus.PENDING) {
+      try {
+        const mpesaStatus = await this.mpesaService.queryStatus(
+          purchase.paymentReference,
+        );
+        this.logger.log(
+          `confirmPayment reconcile — purchase=${purchase.id} mpesaStatus=${mpesaStatus.status}`,
+        );
+      } catch (e) {
+        // No M-Pesa txn found / transient — fall through with PENDING.
+      }
+    }
+
+    // Re-read in case the grant path completed it during the poll window.
+    const fresh = await this.subscriptionPurchasesService.findOne(purchaseId);
     return {
-      transactionId: purchase.id,
-      reference: purchase.paymentReference,
-      status: purchase.status, // PENDING / COMPLETED / FAILED / REVERSED
+      transactionId: fresh!.id,
+      reference: fresh!.paymentReference,
+      status: fresh!.status,
       timestamp: new Date().toISOString(),
-      amount: purchase.amountPaid,
+      amount: fresh!.amountPaid,
     };
+  }
+
+  /**
+   * Q-W2-21: persist the agent's processing mode. W4 reads this during SMS
+   * handling; for now it just stores the choice.
+   */
+  async setProcessingMode(agentId: string, mode: ProcessingMode) {
+    const wallet = await this.getWalletByAgentId(agentId);
+    wallet.processingMode = mode;
+    await this.walletsRepository.save(wallet);
+    return { processingMode: wallet.processingMode };
+  }
+
+  /** 07######## or 2547######## or +2547######## → 2547######## */
+  private toDarajaMsisdn(phone: string): string {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.startsWith('254')) return digits;
+    if (digits.startsWith('0')) return '254' + digits.slice(1);
+    if (digits.startsWith('7') || digits.startsWith('1')) return '254' + digits;
+    return digits;
   }
 }

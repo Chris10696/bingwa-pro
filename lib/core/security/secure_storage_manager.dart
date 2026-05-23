@@ -1,31 +1,38 @@
 // lib/core/security/secure_storage_manager.dart
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:encrypt/encrypt.dart' as encrypt_lib;
 import '../constants/storage_constants.dart';
 //import '../errors/exceptions.dart';
 import '../utils/logger.dart';
 
 class SecureStorageManager {
-  // Configure Android options to prevent the -16 error
+  // flutter_secure_storage handles encryption at rest via the Android Keystore
+  // (hardware-backed). We pin the cipher explicitly and enable migration so the
+  // legacy RSA-encrypted values transparently move to AES-GCM on first access.
   static const FlutterSecureStorage _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
       preferencesKeyPrefix: 'bingwa_',
+      keyCipherAlgorithm: KeyCipherAlgorithm.RSA_ECB_OAEPwithSHA_256andMGF1Padding,
+      storageCipherAlgorithm: StorageCipherAlgorithm.AES_GCM_NoPadding,
     ),
     iOptions: IOSOptions(
       accessibility: KeychainAccessibility.first_unlock,
     ),
   );
-  
+
   // Fallback SharedPreferences for when secure storage fails
   static SharedPreferences? _prefs;
+
+  // NOTE (W2 fix): the previous build wrapped every token in a second AES layer
+  // using encrypt_lib.Key.fromLength(32) / IV.fromLength(16). Those are RANDOM
+  // and regenerated on every app launch, so any token saved in one session was
+  // undecryptable in the next ("Invalid or corrupted pad block" → garbage token
+  // → 401 storm). flutter_secure_storage already encrypts at rest with a
+  // persistent keystore key, so that inner layer was redundant AND fatal to
+  // session persistence. It has been removed entirely.
   
-  // Generate a key - in production, this should be securely generated and stored
-  static final _key = encrypt_lib.Key.fromLength(32);
-  static final _iv = encrypt_lib.IV.fromLength(16);
-  static final _encrypter = encrypt_lib.Encrypter(encrypt_lib.AES(_key));
-  
+ 
   // Storage version for migration
   static const int _currentStorageVersion = 1;
   static const String _storageVersionKey = 'storage_version';
@@ -97,7 +104,6 @@ class SecureStorageManager {
   // Validate storage integrity
   static Future<void> _validateStorage() async {
     try {
-      // Try to read each key to validate data integrity
       final keys = [
         StorageConstants.authToken,
         StorageConstants.refreshToken,
@@ -108,30 +114,15 @@ class SecureStorageManager {
         StorageConstants.biometricKey,
         _keyBiometricEnabled,
       ];
-      
+
       for (final key in keys) {
         try {
-          final value = await _safeRead(key);
-          if (value != null) {
-            // Try to decrypt if it's an encrypted key
-            if (key == StorageConstants.authToken || 
-                key == StorageConstants.refreshToken ||
-                key == StorageConstants.encryptedPin ||
-                key == StorageConstants.biometricKey) {
-              try {
-                _encrypter.decrypt64(value, iv: _iv);
-              } catch (e) {
-                AppLogger.w('Decrypt validation failed for key: $key — leaving as-is. '
-                'Will surface as a login failure if it persists.');
-              }
-            }
-          }
+          await _safeRead(key); // readability check only
         } catch (e) {
-          AppLogger.w('Corrupted data detected for key: $key');
+          AppLogger.w('Corrupted data detected for key: $key — deleting');
           await _delete(key);
         }
       }
-      
     } catch (e) {
       AppLogger.e('Storage validation failed', e);
     }
@@ -155,11 +146,15 @@ class SecureStorageManager {
   // Safe read with error handling - tries secure storage first, falls back to SharedPreferences
   static Future<String?> _safeRead(String key) async {
     try {
-      // Try secure storage first
       return await _storage.read(key: key);
     } catch (e) {
-      // If secure storage fails, try SharedPreferences
-      AppLogger.w('Secure storage read failed for key: $key, trying SharedPreferences', e);
+      // Includes keystore decryption failures ("corrupted pad block") from a
+      // pre-migration cipher. Treat as absent and self-heal by removing it, so
+      // the app cleanly routes to login rather than sending a garbage token.
+      AppLogger.w('Secure read failed for key: $key — treating as absent', e);
+      try {
+        await _storage.delete(key: key);
+      } catch (_) {/* best effort */}
       try {
         await _initPrefs();
         return _prefs?.getString(key);
@@ -204,59 +199,24 @@ class SecureStorageManager {
 
   // Token Management
   static Future<void> saveAuthToken(String token) async {
-    try {
-      final encrypted = _encrypter.encrypt(token, iv: _iv);
-      await _safeWrite(StorageConstants.authToken, encrypted.base64);
-    } catch (e) {
-      // If encryption fails, save plain text (not recommended but better than nothing)
-      AppLogger.w('Encryption failed, saving auth token in plain text', e);
-      await _safeWrite(StorageConstants.authToken, token);
-    }
+    // Stored directly; flutter_secure_storage encrypts at rest.
+    await _safeWrite(StorageConstants.authToken, token);
   }
-  
+
   static Future<String?> getAuthToken() async {
-    try {
-      final encrypted = await _safeRead(StorageConstants.authToken);
-      if (encrypted == null) return null;
-      
-      // Try to decrypt
-      try {
-        return _encrypter.decrypt64(encrypted, iv: _iv);
-      } catch (e) {
-        // If decryption fails, it might be plain text from fallback
-        AppLogger.w('Decryption failed, returning raw value', e);
-        return encrypted;
-      }
-    } catch (e) {
-      AppLogger.e('Failed to get auth token', e);
-      return null;
-    }
+    final value = await _safeRead(StorageConstants.authToken);
+    if (value == null || value.isEmpty) return null;
+    return value;
   }
   
   static Future<void> saveRefreshToken(String token) async {
-    try {
-      final encrypted = _encrypter.encrypt(token, iv: _iv);
-      await _safeWrite(StorageConstants.refreshToken, encrypted.base64);
-    } catch (e) {
-      AppLogger.w('Encryption failed, saving refresh token in plain text', e);
-      await _safeWrite(StorageConstants.refreshToken, token);
-    }
+    await _safeWrite(StorageConstants.refreshToken, token);
   }
-  
+
   static Future<String?> getRefreshToken() async {
-    try {
-      final encrypted = await _safeRead(StorageConstants.refreshToken);
-      if (encrypted == null) return null;
-      
-      try {
-        return _encrypter.decrypt64(encrypted, iv: _iv);
-      } catch (e) {
-        return encrypted;
-      }
-    } catch (e) {
-      AppLogger.e('Failed to get refresh token', e);
-      return null;
-    }
+    final value = await _safeRead(StorageConstants.refreshToken);
+    if (value == null || value.isEmpty) return null;
+    return value;
   }
   
   // Session Management
@@ -291,29 +251,13 @@ class SecureStorageManager {
   
   // PIN Management
   static Future<void> saveEncryptedPin(String pin) async {
-    try {
-      final encrypted = _encrypter.encrypt(pin, iv: _iv);
-      await _safeWrite(StorageConstants.encryptedPin, encrypted.base64);
-    } catch (e) {
-      AppLogger.w('Encryption failed, saving PIN in plain text', e);
-      await _safeWrite(StorageConstants.encryptedPin, pin);
-    }
+    await _safeWrite(StorageConstants.encryptedPin, pin);
   }
-  
+
   static Future<String?> getEncryptedPin() async {
-    try {
-      final encrypted = await _safeRead(StorageConstants.encryptedPin);
-      if (encrypted == null) return null;
-      
-      try {
-        return _encrypter.decrypt64(encrypted, iv: _iv);
-      } catch (e) {
-        return encrypted;
-      }
-    } catch (e) {
-      AppLogger.e('Failed to get PIN', e);
-      return null;
-    }
+    final value = await _safeRead(StorageConstants.encryptedPin);
+    if (value == null || value.isEmpty) return null;
+    return value;
   }
   
   // Agent Management
@@ -327,29 +271,13 @@ class SecureStorageManager {
   
   // Biometric Management
   static Future<void> saveBiometricKey(String key) async {
-    try {
-      final encrypted = _encrypter.encrypt(key, iv: _iv);
-      await _safeWrite(StorageConstants.biometricKey, encrypted.base64);
-    } catch (e) {
-      AppLogger.w('Encryption failed, saving biometric key in plain text', e);
-      await _safeWrite(StorageConstants.biometricKey, key);
-    }
+    await _safeWrite(StorageConstants.biometricKey, key);
   }
-  
+
   static Future<String?> getBiometricKey() async {
-    try {
-      final encrypted = await _safeRead(StorageConstants.biometricKey);
-      if (encrypted == null) return null;
-      
-      try {
-        return _encrypter.decrypt64(encrypted, iv: _iv);
-      } catch (e) {
-        return encrypted;
-      }
-    } catch (e) {
-      AppLogger.e('Failed to get biometric key', e);
-      return null;
-    }
+    final value = await _safeRead(StorageConstants.biometricKey);
+    if (value == null || value.isEmpty) return null;
+    return value;
   }
   
   // Check if biometric is enabled via key existence

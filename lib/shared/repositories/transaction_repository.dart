@@ -136,7 +136,7 @@ class TransactionRepository {
 
   Future<TransactionDetails> getTransactionDetails(String transactionId) async {
     try {
-      final url = '/transactions/$transactionId/details';
+      final url = '/transactions/$transactionId';
       AppLogger.logNetworkRequest(method: 'GET', url: url);
       final response = await _dio.get(url);
       AppLogger.logNetworkResponse(
@@ -209,6 +209,44 @@ class TransactionRepository {
       AppLogger.e('Report transaction issue error:', e);
       rethrow;
     }
+  }
+
+ // W2.D Quick Dial: POST /transactions. Returns the created transaction id +
+// status. With dio validateStatus<500, a 402 (no usable tokens) resolves
+// rather than throws — caller must inspect statusCode.
+  Future<Response> createQuickDial({
+    required String offerId,
+    required String customerPhone,
+  }) async {
+    final body = {'offerId': offerId, 'customerPhone': customerPhone};
+    AppLogger.logNetworkRequest(
+      method: 'POST', url: ApiConstants.transactions, data: body);
+    final response = await _dio.post(ApiConstants.transactions, data: body);
+    AppLogger.logNetworkResponse(
+      statusCode: response.statusCode ?? 0,
+      url: ApiConstants.transactions, data: response.data);
+    return response;
+  }
+
+  // W2.F: GET /transactions/scheduled.
+  Future<List<ScheduledTransaction>> getScheduled() async {
+    final response = await _dio.get(ApiConstants.scheduledTransactions);
+    final list = (response.data['scheduled'] as List<dynamic>?) ?? const [];
+    return list
+        .map((e) => ScheduledTransaction.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  // W2.F: POST /transactions/schedule.
+  Future<ScheduledTransaction> schedule(ScheduleTransactionRequest req) async {
+    final response =
+        await _dio.post(ApiConstants.scheduleTransaction, data: req.toJson());
+    return ScheduledTransaction.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  // W2.F: DELETE /transactions/scheduled/:id.
+  Future<void> cancelScheduled(String id) async {
+    await _dio.delete('${ApiConstants.scheduledTransactions}/$id');
   }
 }
 

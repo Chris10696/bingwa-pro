@@ -259,6 +259,33 @@ class WalletRepository {
       rethrow;
     }
   }
+
+    // W2.B: POST /coupons/redeem. With validateStatus<500, 400/404 resolve;
+  // caller inspects statusCode.
+  Future<Response> redeemCoupon(String couponCode) async {
+    final body = {'couponCode': couponCode};
+    AppLogger.logNetworkRequest(
+      method: 'POST', url: ApiConstants.couponsRedeem, data: body);
+    final response = await _dio.post(ApiConstants.couponsRedeem, data: body);
+    AppLogger.logNetworkResponse(
+      statusCode: response.statusCode ?? 0,
+      url: ApiConstants.couponsRedeem, data: response.data);
+    return response;
+  }
+
+  // W2.G: PATCH /wallet/processing-mode.
+  Future<void> setProcessingMode(String mode) async {
+    await _dio.patch(ApiConstants.processingMode,
+        data: {'processingMode': mode});
+  }
+
+  // W2.B: GET /mpesa/status/:checkoutRequestId — polling for STK status.
+  Future<Map<String, dynamic>> getMpesaStatus(String checkoutRequestId) async {
+    final url = ApiConstants.mpesaStatus
+        .replaceFirst('{checkoutRequestId}', checkoutRequestId);
+    final response = await _dio.get(url);
+    return response.data as Map<String, dynamic>;
+  }
 }
 
 final walletRepositoryProvider = Provider<WalletRepository>((ref) {

@@ -1,12 +1,10 @@
 // bingwa-pro-backend/src/transactions/entities/transaction.entity.ts
-// W1 ripple edit:
-//   - productId → offerId, productName → offerName
-//   - bundleSize dropped (subsumed by offer's name/validityLabel)
-//   - ussdCode + ussdResponse retained (runtime, not offer metadata)
-//   - Added subscriptionPlanId FK (ON DELETE SET NULL) per Q5 locked rule
-//   - TransactionType: AIRTIME and BUNDLE dropped; TOKEN_PURCHASE renamed to
-//     SUBSCRIPTION_PURCHASE; MINUTES added
-//   - tokenAmount field retained for now (commission column for W5; deferred)
+// W2.A: TransactionType replaced with Hybrid's 6 trigger-source values
+// (Q-W2-2). TransactionStatus replaced with Hybrid's 10 values (Q-W2-3).
+// Added 7 Hybrid runtime fields. Existing W1 fields retained (additive only;
+// removing them is churn with no behavioral benefit — D-W2-2).
+// NOTE: enum value strings change — transactions table is dropped/recreated
+// on deploy (see Batch 1 deploy SQL).
 import {
   Entity,
   Column,
@@ -20,22 +18,30 @@ import {
 import { Agent } from '../../agents/entities/agent.entity';
 import { SubscriptionPlan } from '../../subscriptions/entities/subscription-plan.entity';
 
+// Hybrid classifies transactions by how they were triggered (payment source),
+// not by what was purchased — the product is captured by the linked Offer.
 export enum TransactionType {
-  DATA = 'data',
-  MINUTES = 'minutes',
-  SMS = 'sms',
-  SUBSCRIPTION_PURCHASE = 'subscription_purchase',
-  COMMISSION = 'commission',
+  TILL = 'TILL',
+  MPESA = 'MPESA',
+  SITE_LINK = 'SITE_LINK',
+  SUBSCRIPTION_RENEWAL = 'SUBSCRIPTION_RENEWAL',
+  QUICK_DIAL = 'QUICK_DIAL',
+  AIRTIME_BALANCE_CHECK = 'AIRTIME_BALANCE_CHECK',
 }
 
+// Hybrid's full 10-state lifecycle. W2 actively writes SCHEDULED, PROCESSING,
+// SUCCESS, FAILED, PAUSED; the rest are written by W3's pipeline.
 export enum TransactionStatus {
-  INITIATED = 'initiated',
-  VALIDATED = 'validated',
-  EXECUTING = 'executing',
-  SUCCESS = 'success',
-  FAILED = 'failed',
-  PENDING = 'pending',
-  ABORTED = 'aborted',
+  UNMATCHED = 'UNMATCHED',
+  SCHEDULED = 'SCHEDULED',
+  PROCESSING = 'PROCESSING',
+  SUCCESS = 'SUCCESS',
+  FAILED = 'FAILED',
+  FAILED_ALREADY_RECOMMENDED = 'FAILED_ALREADY_RECOMMENDED',
+  FAILED_OFFER_DEACTIVATED = 'FAILED_OFFER_DEACTIVATED',
+  RESCHEDULED = 'RESCHEDULED',
+  PAUSED = 'PAUSED',
+  BLOCKED = 'BLOCKED',
 }
 
 @Entity('transactions')
@@ -54,10 +60,7 @@ export class Transaction {
   @JoinColumn({ name: 'agentId' })
   agent: Agent;
 
-  @Column({
-    type: 'enum',
-    enum: TransactionType,
-  })
+  @Column({ type: 'enum', enum: TransactionType })
   type: TransactionType;
 
   @Column('decimal', { precision: 15, scale: 2 })
@@ -72,7 +75,7 @@ export class Transaction {
   @Column({
     type: 'enum',
     enum: TransactionStatus,
-    default: TransactionStatus.INITIATED,
+    default: TransactionStatus.SCHEDULED,
   })
   status: TransactionStatus;
 
@@ -88,7 +91,7 @@ export class Transaction {
   @Column({ nullable: true })
   safaricomReference: string;
 
-  // ===== OFFER FIELDS (renamed from product*) =====
+  // ===== OFFER FIELDS =====
   @Column({ nullable: true })
   offerId: string;
 
@@ -100,14 +103,9 @@ export class Transaction {
 
   @Column({ nullable: true })
   ussdResponse: string;
-  // ================================================
+  // ========================
 
-  // ===== SUBSCRIPTION PLAN ATTRIBUTION (per Q5) =====
-  // Which active plan was debited for this consumption. Nullable: pre-W1
-  // transactions don't have it; W3+ may have transactions that consumed
-  // from no plan (e.g. free retries, system-initiated). ON DELETE SET NULL
-  // so plan history can be reconstructed even after plan rows are pruned.
-  // Not indexed in W1 — revisit in W5 statistics work.
+  // ===== SUBSCRIPTION PLAN ATTRIBUTION (W1, Q5) =====
   @Column({ type: 'uuid', nullable: true })
   subscriptionPlanId: string | null;
 
@@ -115,6 +113,37 @@ export class Transaction {
   @JoinColumn({ name: 'subscriptionPlanId' })
   subscriptionPlan: SubscriptionPlan | null;
   // ==================================================
+
+  // ===== W2 Hybrid runtime fields (additive) =====
+  // Retries within the current dial session (W3 increments).
+  @Column({ type: 'int', default: 0 })
+  internalRetries: number;
+
+  // Re-queued retries across sessions (W3 increments).
+  @Column({ type: 'int', default: 0 })
+  externalRetries: number;
+
+  // Dual-SIM target hint (W3 uses).
+  @Column({ type: 'int', nullable: true })
+  recommendedSimForDialing: number | null;
+
+  // When status=SCHEDULED, holds { scheduledFor, isRecurring, daysRemaining }.
+  // Auto-renewals are scheduled transactions, not a separate entity (D-W2-5).
+  @Column({ type: 'jsonb', nullable: true })
+  rescheduleInfo: Record<string, any> | null;
+
+  // M-Pesa receipt code (W4 SMS flow populates).
+  @Column({ type: 'varchar', nullable: true })
+  mpesaCode: string | null;
+
+  // Full M-Pesa SMS text preserved for audit (W4).
+  @Column({ type: 'text', nullable: true })
+  mpesaMessage: string | null;
+
+  // USSD response text from Safaricom (W3 populates).
+  @Column({ type: 'text', nullable: true })
+  responseMessage: string | null;
+  // ===============================================
 
   @Column({ default: 0 })
   tokenAmount: number;

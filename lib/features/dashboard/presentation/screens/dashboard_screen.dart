@@ -931,20 +931,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     // W1: icon switch updated for new TransactionType enum
     IconData icon;
     switch (transaction.type) {
-      case TransactionType.data:
-        icon = Icons.wifi;
+      case TransactionType.quickDial:
+        icon = Icons.phone_forwarded;
         break;
-      case TransactionType.minutes:
-        icon = Icons.phone_in_talk;
+      case TransactionType.mpesa:
+        icon = Icons.payments;
         break;
-      case TransactionType.sms:
-        icon = Icons.message;
+      case TransactionType.till:
+        icon = Icons.point_of_sale;
         break;
-      case TransactionType.subscriptionPurchase:
-        icon = Icons.card_membership;
+      case TransactionType.siteLink:
+        icon = Icons.link;
         break;
-      case TransactionType.commission:
-        icon = Icons.attach_money;
+      case TransactionType.subscriptionRenewal:
+        icon = Icons.autorenew;
+        break;
+      case TransactionType.airtimeBalanceCheck:
+        icon = Icons.account_balance_wallet;
         break;
     }
     return Card(

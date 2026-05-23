@@ -1,7 +1,7 @@
 // bingwa-pro-backend/src/offers/offers.controller.ts
-// W1: renamed from ProductsController. Dropped endpoints that referenced
-// dropped Product fields (network, type filtering, popular/featured, validate).
-// Category endpoints split into CategoriesController.
+// W2.A: controller-level JwtAuthGuard — all endpoints agent-scoped (Q-W2-17).
+// create/update/remove pass req.user.sub; findAll scoped to the authed agent.
+// Bulk-create endpoint removed (unused; referenced the old category path).
 import {
   Controller,
   Get,
@@ -12,6 +12,7 @@ import {
   Param,
   Query,
   UseGuards,
+  Request,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -22,26 +23,18 @@ import { OfferFilterDto } from './dto/offer-filter.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('offers')
+@UseGuards(JwtAuthGuard)
 export class OffersController {
   constructor(private readonly offersService: OffersService) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
-  async createOffer(@Body() createOfferDto: CreateOfferDto) {
-    return this.offersService.createOffer(createOfferDto);
-  }
-
-  // TODO(wave-3): review whether bulk-create is still needed when seeding moves
-  // out of the seed file and into agent-driven creation flows.
-  @Post('bulk')
-  @UseGuards(JwtAuthGuard)
-  async bulkCreateOffers(@Body() offers: CreateOfferDto[]) {
-    return this.offersService.bulkCreateOffers(offers);
+  async createOffer(@Request() req, @Body() createOfferDto: CreateOfferDto) {
+    return this.offersService.createOffer(req.user.sub, createOfferDto);
   }
 
   @Get()
-  async findAllOffers(@Query() filterDto: OfferFilterDto) {
-    return this.offersService.findAllOffers(filterDto);
+  async findAllOffers(@Request() req, @Query() filterDto: OfferFilterDto) {
+    return this.offersService.findAllOffers(req.user.sub, filterDto);
   }
 
   @Get(':id')
@@ -49,22 +42,18 @@ export class OffersController {
     return this.offersService.findOneOffer(id);
   }
 
-  // PATCH handles both full update (body has any of name, price, ussdTemplate,
-  // validityLabel, categoryId, isActive) and lightweight toggle (body has only
-  // {isActive: bool}). Single endpoint per Q10.
   @Patch(':id')
-  @UseGuards(JwtAuthGuard)
   async updateOffer(
+    @Request() req,
     @Param('id') id: string,
     @Body() updateOfferDto: UpdateOfferDto,
   ) {
-    return this.offersService.updateOffer(id, updateOfferDto);
+    return this.offersService.updateOffer(id, req.user.sub, updateOfferDto);
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
-  async removeOffer(@Param('id') id: string) {
-    await this.offersService.removeOffer(id);
+  async removeOffer(@Request() req, @Param('id') id: string) {
+    await this.offersService.removeOffer(id, req.user.sub);
   }
 }

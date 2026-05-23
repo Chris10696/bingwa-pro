@@ -145,7 +145,7 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: () {
-                context.go('/airtime');
+                context.go('/quick-dial'); // W2 fix: was /airtime (removed in W1)
               },
               child: const Text('Make Your First Transaction'),
             ),
@@ -282,12 +282,17 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
       case 'success':
         return Colors.green;
       case 'failed':
+      case 'failedalreadyrecommended':
+      case 'failedofferdeactivated':
+      case 'blocked':
         return Colors.red;
-      case 'pending':
-      case 'initiated':
-      case 'validated':
-      case 'executing':
+      case 'scheduled':
+      case 'processing':
+      case 'rescheduled':
+      case 'paused':
         return Colors.orange;
+      case 'unmatched':
+        return Colors.grey;
       default:
         return Colors.blue;
     }
@@ -304,16 +309,18 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
 
   IconData _getTransactionIcon(String type) {
     switch (type) {
-      case 'airtime':
-        return Icons.phone;
-      case 'data':
-        return Icons.wifi;
-      case 'sms':
-        return Icons.message;
-      case 'bundle':
-        return Icons.shopping_bag;
-      case 'minutes':
-        return Icons.call;
+      case 'quickdial':
+        return Icons.phone_forwarded;
+      case 'mpesa':
+        return Icons.payments;
+      case 'till':
+        return Icons.point_of_sale;
+      case 'sitelink':
+        return Icons.link;
+      case 'subscriptionrenewal':
+        return Icons.autorenew;
+      case 'airtimebalancecheck':
+        return Icons.account_balance_wallet;
       default:
         return Icons.receipt;
     }

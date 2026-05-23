@@ -1,6 +1,5 @@
 // lib/shared/models/agent_model.dart
 import 'package:freezed_annotation/freezed_annotation.dart';
-import 'auth_model.dart'; // Import AgentProfile from auth_model
 
 part 'agent_model.freezed.dart';
 part 'agent_model.g.dart';

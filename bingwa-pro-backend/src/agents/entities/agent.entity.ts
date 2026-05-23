@@ -1,11 +1,23 @@
 // bingwa-pro-backend/src/agents/entities/agent.entity.ts
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToOne } from 'typeorm';
+// W2.A: till/paybill fields dropped entirely (D-W2-4) — Hybrid has no such
+// concept; agent payment identity is SIM-based (W4). Dropped: tillNumber,
+// paybillNumber, paybillAccount, tillNumberVerified, tillNumberVerifiedAt,
+// tillNumberStatus, defaultPaymentMethod, paymentSettings. (Columns are
+// removed in-place by synchronize; agent rows are preserved.)
+import {
+  Entity,
+  Column,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+  OneToOne,
+} from 'typeorm';
 import { Wallet } from '../../wallets/entities/wallet.entity';
 
 export enum AgentStatus {
   PENDING = 'pending',
   ACTIVE = 'active',
-  SUSPENDED = 'suspended',  
+  SUSPENDED = 'suspended',
   TERMINATED = 'terminated',
   PENDING_VERIFICATION = 'pending_verification',
 }
@@ -28,7 +40,7 @@ export class Agent {
   email: string;
 
   @Column()
-  pinHash: string; // CHANGED FROM 'pin' TO 'pinHash' to match database
+  pinHash: string;
 
   @Column({ nullable: true })
   agentCode: string;
@@ -42,48 +54,17 @@ export class Agent {
   @Column({
     type: 'enum',
     enum: AgentStatus,
-    default: AgentStatus.PENDING
+    default: AgentStatus.PENDING,
   })
   status: AgentStatus;
 
-  // ADD THESE FIELDS - they exist in database but missing in entity
   @Column()
   deviceId: string;
 
   @Column({ default: 'android' })
   platform: string;
 
-  // TILL NUMBER FIELDS
-  @Column({ nullable: true })
-  tillNumber: string;
-
-  @Column({ nullable: true })
-  paybillNumber: string;
-
-  @Column({ nullable: true })
-  paybillAccount: string;
-
-  @Column({ default: false })
-  tillNumberVerified: boolean;
-
-  @Column({ nullable: true })
-  tillNumberVerifiedAt: Date;
-
-  @Column({ default: 'pending' })
-  tillNumberStatus: string;
-
-  @Column({ nullable: true })
-  defaultPaymentMethod: string;
-
-  @Column({ type: 'json', nullable: true })
-  paymentSettings: {
-    autoDetectPayments: boolean;
-    notifyOnPayment: boolean;
-    minAmount: number;
-    maxAmount: number;
-  };
-
-  @OneToOne(() => Wallet, wallet => wallet.agent)
+  @OneToOne(() => Wallet, (wallet) => wallet.agent)
   wallet: Wallet;
 
   @CreateDateColumn()

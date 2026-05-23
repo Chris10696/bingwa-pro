@@ -1,15 +1,10 @@
 // bingwa-pro-backend/src/offers/dto/offer-filter.dto.ts
-// W1: renamed from ProductFilterDto. Stripped filters for dropped fields
-// (type, network, isPopular, isFeatured, minPrice, maxPrice).
-import {
-  IsOptional,
-  IsBoolean,
-  IsString,
-  IsUUID,
-  IsInt,
-  Min,
-} from 'class-validator';
+// W2.A: categoryId filter dropped (D-W2-1), replaced with type (OfferType).
+// agentId filter removed — the controller forces scoping to the JWT subject
+// (Q-W2-17), so clients cannot query other agents' offers.
+import { IsOptional, IsBoolean, IsString, IsEnum, IsInt, Min } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
+import { OfferType } from '../entities/offer.entity';
 
 export class OfferFilterDto {
   @IsOptional()
@@ -18,12 +13,8 @@ export class OfferFilterDto {
   isActive?: boolean;
 
   @IsOptional()
-  @IsUUID()
-  categoryId?: string;
-
-  @IsOptional()
-  @IsUUID()
-  agentId?: string;
+  @IsEnum(OfferType)
+  type?: OfferType;
 
   @IsOptional()
   @IsString()

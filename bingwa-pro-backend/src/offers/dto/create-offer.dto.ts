@@ -1,39 +1,37 @@
 // bingwa-pro-backend/src/offers/dto/create-offer.dto.ts
-// W1: renamed from CreateProductDto. Validates the exact W1 Offer fields.
+// W2.A: dropped validityLabel + categoryId + client-supplied agentId (agentId
+// now comes from the JWT, Q-W2-17). Added type (OfferType). ussdTemplate →
+// ussdCode (D-W2-F). The 8 retry fields are NOT accepted here — they take
+// entity defaults; W3's OfferSettings UI edits them.
 import {
   IsString,
   IsInt,
   Min,
-  IsUUID,
   IsBoolean,
   IsOptional,
+  IsEnum,
   Matches,
 } from 'class-validator';
+import { OfferType } from '../entities/offer.entity';
 
 export class CreateOfferDto {
   @IsString()
   name: string;
 
-  // USSD template must start with *, end with #, and contain BH placeholder.
+  // Must start with *, end with #, and contain the BH placeholder.
   @IsString()
   @Matches(/^\*[\d*]+BH[\d*]*#$/, {
     message:
-      'ussdTemplate must be a valid USSD code containing the BH placeholder (e.g. *180*5*2*BH*1*1#)',
+      'ussdCode must be a valid USSD code containing the BH placeholder (e.g. *180*5*2*BH*1*1#)',
   })
-  ussdTemplate: string;
+  ussdCode: string;
 
   @IsInt()
   @Min(1)
   price: number;
 
-  @IsString()
-  validityLabel: string;
-
-  @IsUUID()
-  categoryId: string;
-
-  @IsUUID()
-  agentId: string;
+  @IsEnum(OfferType)
+  type: OfferType;
 
   @IsBoolean()
   @IsOptional()

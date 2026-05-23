@@ -230,7 +230,7 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
         agentId: agentId,
         customerPhone: customerPhone,
         amount: amount,
-        type: TransactionType.data, // TODO(wave-2): from offer.category
+        type: TransactionType.quickDial, // TODO(wave-2): from offer.category
         status: TransactionStatus.success,
         offerId: offerId,
         offerName: 'Subscription Offer', // TODO(wave-2): from offer.name
@@ -280,13 +280,18 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
     if (filter == 'success') {
       statuses = [TransactionStatus.success];
     } else if (filter == 'failed') {
-      statuses = [TransactionStatus.failed, TransactionStatus.aborted];
+      statuses = [
+        TransactionStatus.failed,
+        TransactionStatus.failedAlreadyRecommended,
+        TransactionStatus.failedOfferDeactivated,
+        TransactionStatus.blocked,
+      ];
     } else if (filter == 'pending') {
       statuses = [
-        TransactionStatus.pending,
-        TransactionStatus.initiated,
-        TransactionStatus.validated,
-        TransactionStatus.executing,
+        TransactionStatus.scheduled,
+        TransactionStatus.processing,
+        TransactionStatus.rescheduled,
+        TransactionStatus.paused,
       ];
     }
     DateTime? startDate;

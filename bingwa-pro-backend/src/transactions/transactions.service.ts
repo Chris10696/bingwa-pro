@@ -1,12 +1,16 @@
 // bingwa-pro-backend/src/transactions/transactions.service.ts
-// W1: service bodies preserved unchanged. Entity field renames (productId →
-// offerId, productName → offerName, drop bundleSize) don't affect this
-// service since it doesn't reference those fields in its query bodies.
-// TransactionType/TransactionStatus enum imports unchanged at usage sites.
+// W2.D: added createQuickDial (hasUsableTokens 402 guard, create QUICK_DIAL
+// transaction, debit on success) and scheduled-transaction methods
+// (findScheduled / schedule / cancelScheduled — auto-renewals as SCHEDULED
+// transactions, D-W2-5). recordSmsPayment agentId now from req.user.sub
+// (controller fix). Batch-1 methods unchanged.
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
@@ -17,6 +21,8 @@ import {
 } from './entities/transaction.entity';
 import { Agent } from '../agents/entities/agent.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
+import { Offer } from '../offers/entities/offer.entity';
+import { SubscriptionPlansService } from '../subscriptions/subscription-plans.service';
 
 @Injectable()
 export class TransactionsService {
@@ -27,6 +33,9 @@ export class TransactionsService {
     private agentsRepository: Repository<Agent>,
     @InjectRepository(Wallet)
     private walletsRepository: Repository<Wallet>,
+    @InjectRepository(Offer)
+    private offersRepository: Repository<Offer>,
+    private subscriptionPlansService: SubscriptionPlansService,
   ) {}
 
   async getTransactionHistory(
@@ -111,6 +120,136 @@ export class TransactionsService {
     };
   }
 
+  /**
+   * W2.D Quick Dial. Guards with hasUsableTokens (402 if none). Creates a
+   * QUICK_DIAL transaction in SUCCESS (intent-based dial is fire-and-forget;
+   * the agent reads the real response on the system dialer), then debits a
+   * LIMITED token if applicable (UNLIMITED active → no debit).
+   */
+  async createQuickDial(
+    agentId: string,
+    data: { offerId: string; customerPhone: string },
+  ): Promise<Transaction> {
+    const usable = await this.subscriptionPlansService.hasUsableTokens(agentId);
+    if (!usable) {
+      throw new HttpException(
+        'No active subscription. Please subscribe to a plan.',
+        HttpStatus.PAYMENT_REQUIRED, // 402
+      );
+    }
+
+    const offer = await this.offersRepository.findOne({
+      where: { id: data.offerId },
+    });
+    if (!offer) {
+      throw new NotFoundException('Offer not found');
+    }
+    if (offer.agentId !== agentId) {
+      throw new ForbiddenException('Offer does not belong to this agent');
+    }
+
+    const reference = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const transaction = this.transactionsRepository.create({
+      agentId,
+      reference,
+      type: TransactionType.QUICK_DIAL,
+      status: TransactionStatus.SUCCESS,
+      amount: offer.price,
+      offerId: offer.id,
+      offerName: offer.name,
+      customerPhone: data.customerPhone,
+      ussdCode: offer.ussdCode,
+    });
+    const saved = await this.transactionsRepository.save(transaction);
+
+    // Plan debit (Hybrid checkIfShouldUpdateTokens).
+    const debited = await this.subscriptionPlansService.decrementLimitedToken(
+      agentId,
+    );
+    if (debited) {
+      const wallet = await this.walletsRepository.findOne({
+        where: { agentId },
+      });
+      if (wallet) {
+        wallet.lifetimeTokensConsumed += 1;
+        await this.walletsRepository.save(wallet);
+      }
+    }
+
+    return saved;
+  }
+
+  /**
+   * W2.F auto-renewals: list SCHEDULED transactions (D-W2-5). Ordered by the
+   * scheduled time stored in rescheduleInfo.scheduledFor.
+   */
+  async findScheduled(agentId: string): Promise<Transaction[]> {
+    const rows = await this.transactionsRepository.find({
+      where: { agentId, status: TransactionStatus.SCHEDULED },
+    });
+    return rows.sort((a, b) => {
+      const aT = a.rescheduleInfo?.scheduledFor ?? '';
+      const bT = b.rescheduleInfo?.scheduledFor ?? '';
+      return aT < bT ? -1 : aT > bT ? 1 : 0;
+    });
+  }
+
+  /**
+   * W2.F: schedule an offer for a customer (a "Reschedule Offer"). Persists a
+   * SCHEDULED transaction with rescheduleInfo. W2 does NOT execute it — W3's
+   * pipeline picks up SCHEDULED rows whose scheduledFor <= now.
+   */
+  async schedule(
+    agentId: string,
+    data: {
+      offerId: string;
+      customerPhone: string;
+      scheduledFor: string;
+      isRecurring: boolean;
+      daysToRecur?: number;
+    },
+  ): Promise<Transaction> {
+    const offer = await this.offersRepository.findOne({
+      where: { id: data.offerId },
+    });
+    if (!offer) {
+      throw new NotFoundException('Offer not found');
+    }
+    if (offer.agentId !== agentId) {
+      throw new ForbiddenException('Offer does not belong to this agent');
+    }
+
+    const reference = `SCH${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const transaction = this.transactionsRepository.create({
+      agentId,
+      reference,
+      type: TransactionType.SUBSCRIPTION_RENEWAL,
+      status: TransactionStatus.SCHEDULED,
+      amount: offer.price,
+      offerId: offer.id,
+      offerName: offer.name,
+      customerPhone: data.customerPhone,
+      ussdCode: offer.ussdCode,
+      rescheduleInfo: {
+        scheduledFor: data.scheduledFor,
+        isRecurring: data.isRecurring,
+        daysRemaining: data.isRecurring ? data.daysToRecur ?? null : null,
+      },
+    });
+    return this.transactionsRepository.save(transaction);
+  }
+
+  async cancelScheduled(agentId: string, id: string): Promise<void> {
+    const txn = await this.transactionsRepository.findOne({ where: { id } });
+    if (!txn || txn.agentId !== agentId) {
+      throw new NotFoundException('Scheduled transaction not found');
+    }
+    if (txn.status !== TransactionStatus.SCHEDULED) {
+      throw new ForbiddenException('Transaction is not scheduled');
+    }
+    await this.transactionsRepository.remove(txn);
+  }
+
   async createTransaction(
     agentId: string,
     data: {
@@ -136,7 +275,7 @@ export class TransactionsService {
       recipientPhone: data.recipientPhone,
       description: data.description,
       metadata: data.metadata,
-      status: TransactionStatus.INITIATED,
+      status: TransactionStatus.SCHEDULED,
     });
     return this.transactionsRepository.save(transaction);
   }
@@ -192,10 +331,7 @@ export class TransactionsService {
         startDate = new Date(0);
     }
     const transactions = await this.transactionsRepository.find({
-      where: {
-        agent: { id: agentId },
-        createdAt: MoreThan(startDate),
-      },
+      where: { agent: { id: agentId }, createdAt: MoreThan(startDate) },
     });
     const total = transactions.length;
     const successful = transactions.filter(
@@ -205,19 +341,14 @@ export class TransactionsService {
       (t) => t.status === TransactionStatus.FAILED,
     ).length;
     const pending = transactions.filter(
-      (t) => t.status === TransactionStatus.PENDING,
+      (t) =>
+        t.status === TransactionStatus.PROCESSING ||
+        t.status === TransactionStatus.SCHEDULED,
     ).length;
     const totalAmount = transactions
       .filter((t) => t.status === TransactionStatus.SUCCESS)
       .reduce((sum, t) => sum + Number(t.amount), 0);
-    return {
-      total,
-      successful,
-      failed,
-      pending,
-      totalAmount,
-      period,
-    };
+    return { total, successful, failed, pending, totalAmount, period };
   }
 
   async recordSmsPayment(data: any, agentId: string) {

@@ -1,12 +1,75 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+// bingwa-pro-backend/src/transactions/transactions.controller.ts
+// W2.D: added POST /transactions (Quick Dial), GET /transactions/scheduled,
+// POST /transactions/schedule, DELETE /transactions/scheduled/:id. Fixed
+// recordSmsPayment agentId: req.user.id → req.user.sub (opportunistic).
+// NOTE: route order — /scheduled and /schedule are declared BEFORE /:id so
+// they aren't swallowed by the :id param route.
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { TransactionType, TransactionStatus } from './entities/transaction.entity';
+import {
+  TransactionType,
+  TransactionStatus,
+} from './entities/transaction.entity';
 
 @Controller('transactions')
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
+  // ===== W2.D Quick Dial =====
+  @Post()
+  @UseGuards(JwtAuthGuard)
+  async createQuickDial(
+    @Request() req,
+    @Body() body: { offerId: string; customerPhone: string },
+  ) {
+    return this.transactionsService.createQuickDial(req.user.sub, body);
+  }
+
+  // ===== W2.F scheduled (auto-renewals) — BEFORE /:id =====
+  @Get('scheduled')
+  @UseGuards(JwtAuthGuard)
+  async getScheduled(@Request() req) {
+    const scheduled = await this.transactionsService.findScheduled(
+      req.user.sub,
+    );
+    return { scheduled, total: scheduled.length };
+  }
+
+  @Post('schedule')
+  @UseGuards(JwtAuthGuard)
+  async schedule(
+    @Request() req,
+    @Body()
+    body: {
+      offerId: string;
+      customerPhone: string;
+      scheduledFor: string;
+      isRecurring: boolean;
+      daysToRecur?: number;
+    },
+  ) {
+    return this.transactionsService.schedule(req.user.sub, body);
+  }
+
+  @Delete('scheduled/:id')
+  @UseGuards(JwtAuthGuard)
+  async cancelScheduled(@Request() req, @Param('id') id: string) {
+    await this.transactionsService.cancelScheduled(req.user.sub, id);
+    return { success: true };
+  }
+
+  // ===== existing history/summary/details =====
   @Get('history')
   @UseGuards(JwtAuthGuard)
   async getTransactionHistory(
@@ -25,18 +88,11 @@ export class TransactionsController {
     @Query('sortDesc') sortDesc: string = 'true',
   ) {
     const agentId = req.user.sub;
-
-    // Parse types
     let parsedTypes: TransactionType[] | undefined;
-    if (types) {
-      parsedTypes = types.split(',').map(t => t as TransactionType);
-    }
-
-    // Parse statuses
+    if (types) parsedTypes = types.split(',').map((t) => t as TransactionType);
     let parsedStatuses: TransactionStatus[] | undefined;
-    if (statuses) {
-      parsedStatuses = statuses.split(',').map(s => s as TransactionStatus);
-    }
+    if (statuses)
+      parsedStatuses = statuses.split(',').map((s) => s as TransactionStatus);
 
     return this.transactionsService.getTransactionHistory(agentId, {
       startDate: startDate ? new Date(startDate) : undefined,
@@ -57,8 +113,10 @@ export class TransactionsController {
   @Get('summary/:period')
   @UseGuards(JwtAuthGuard)
   async getTransactionSummary(@Request() req, @Param('period') period: string) {
-    const agentId = req.user.sub;
-    return this.transactionsService.getTransactionSummary(agentId, period);
+    return this.transactionsService.getTransactionSummary(
+      req.user.sub,
+      period,
+    );
   }
 
   @Get(':id')
@@ -70,7 +128,9 @@ export class TransactionsController {
   @Get(':id/status')
   @UseGuards(JwtAuthGuard)
   async getTransactionStatus(@Param('id') id: string) {
-    const transaction = await this.transactionsService.getTransactionDetails(id);
+    const transaction = await this.transactionsService.getTransactionDetails(
+      id,
+    );
     return {
       id: transaction.id,
       status: transaction.status,
@@ -79,13 +139,19 @@ export class TransactionsController {
     };
   }
 
-    @Post('record-sms-payment')
+  @Post('record-sms-payment')
   @UseGuards(JwtAuthGuard)
   async recordSmsPayment(
-    @Body() body: { mpesaTransactionId: string; amount: number; customerPhone: string; agentId: string },
+    @Body()
+    body: {
+      mpesaTransactionId: string;
+      amount: number;
+      customerPhone: string;
+      agentId: string;
+    },
     @Request() req,
   ) {
-    // Returns 409 if duplicate, 201 if new
-    return this.transactionsService.recordSmsPayment(body, req.user.id);
+    // W2.D fix: was req.user.id (undefined) → req.user.sub.
+    return this.transactionsService.recordSmsPayment(body, req.user.sub);
   }
 }

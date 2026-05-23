@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:formz/formz.dart' show FormzInput, FormzSubmissionStatus, FormzSubmissionStatusX;
 import '../../../../shared/models/auth_model.dart';
 import '../../../../shared/repositories/auth_repository.dart';
-import '../../../../shared/repositories/wallet_repository.dart'; // ADD THIS IMPORT
 import '../../../../core/utils/validators.dart';
 import '../../../../core/security/secure_storage_manager.dart';
 import '../../../../core/security/device_fingerprint.dart';
