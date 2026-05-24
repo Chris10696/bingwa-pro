@@ -1,13 +1,11 @@
 // lib/features/wallet/presentation/screens/wallet_screen.dart
-// W1: minimum-fix per Q6.
-//   - Token Balance card → Subscription Status card (plan-status readout)
-//   - Stats row simplified to 2 cards (Lifetime Purchased / Lifetime Consumed)
-//   - Hardcoded packages teaser → fed from state.packages (Q7)
-//   - Transaction list now renders SubscriptionPurchase rows (Q5 rename)
-//
-// TODO(wave-2): redesign as subscription-plans list per Hybrid screenshot 1
-//   (Balance header at top + plan rows + Subscribe button + promo code link).
-//   W1 keeps the existing UI shell to avoid encroaching on W2's scope.
+// W2.4A: Hybrid Subscription-Plans redesign + topup merge.
+//   - Balance header line (Unlimited: Xd XXh XXmin / Limited: X Tokens)
+//   - Selectable plan cards + inline Subscribe (no separate topup screen)
+//   - Provider-driven STK polling (watches pollStatus); on timeout offers
+//     both "Try Again" and "I have paid" (confirmPayment fallback)
+//   - "Have a promo code? Redeem here" link → /redeem-coupon
+//   - Compact purchase history retained below
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -21,7 +19,6 @@ import '../providers/wallet_provider.dart';
 
 class WalletScreen extends ConsumerStatefulWidget {
   const WalletScreen({super.key});
-
   @override
   ConsumerState<WalletScreen> createState() => _WalletScreenState();
 }
@@ -56,36 +53,35 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     final state = ref.watch(walletNotifierProvider);
     final notifier = ref.read(walletNotifierProvider.notifier);
 
+    // React to poll-status transitions for the success dialog.
+    ref.listen<WalletState>(walletNotifierProvider, (prev, next) {
+      if (prev?.pollStatus != StkPollStatus.success &&
+          next.pollStatus == StkPollStatus.success) {
+        _showSuccessDialog();
+      }
+    });
+
     return Scaffold(
       appBar: const CustomAppBar(
         title: 'Subscription',
         showBackButton: true,
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/top-up'),
-        backgroundColor: const Color(0xFF00C853),
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text(
-          'Subscribe',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-      ),
       body: state.isLoading && state.balance == null
-          ? const LoadingIndicator(message: 'Loading wallet...')
+          ? const LoadingIndicator(message: 'Loading subscription...')
           : RefreshIndicator(
               onRefresh: () => notifier.refresh(),
               child: ListView(
                 controller: _scrollController,
-                padding: const EdgeInsets.only(bottom: 100),
+                padding: const EdgeInsets.only(bottom: 40),
                 children: [
-                  _buildSubscriptionStatusCard(state),
+                  _buildBalanceHeader(state),
                   const SizedBox(height: 16),
-                  _buildLifetimeStatsRow(state),
-                  const SizedBox(height: 16),
-                  _buildQuickActions(),
-                  const SizedBox(height: 16),
-                  _buildPackagesTeaser(state),
-                  const SizedBox(height: 16),
+                  _buildPlansSection(state, notifier),
+                  const SizedBox(height: 8),
+                  _buildSubscribePanel(state, notifier),
+                  const SizedBox(height: 12),
+                  _buildRedeemLink(),
+                  const SizedBox(height: 20),
                   _buildPurchasesHeader(),
                   _buildPurchasesList(state),
                 ],
@@ -94,12 +90,11 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     );
   }
 
-  // ── Subscription status card (replaces Token Balance card) ─────────────────
-  Widget _buildSubscriptionStatusCard(WalletState state) {
+  // ── Balance header (Hybrid: Unlimited line + Limited line) ──────────────────
+  Widget _buildBalanceHeader(WalletState state) {
     final plans = state.balance?.plans ?? const <SubscriptionPlan>[];
     final unlimited = _firstUnlimited(plans);
     final limited = _firstLimited(plans);
-    final hasAny = unlimited != null || limited != null;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -127,7 +122,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               Icon(Icons.card_membership, color: Colors.white70, size: 18),
               SizedBox(width: 6),
               Text(
-                'SUBSCRIPTION STATUS',
+                'BALANCE',
                 style: TextStyle(
                   color: Colors.white70,
                   fontSize: 13,
@@ -138,69 +133,43 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          if (!hasAny)
-            const Text(
-              'No active plan',
-              style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            )
-          else ...[
-            if (unlimited != null)
-              Text(
-                'Unlimited: ${_formatRemainingDuration(unlimited.expiresAt!)}',
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  height: 1.2,
-                ),
-              ),
-            if (limited != null)
-              Padding(
-                padding: EdgeInsets.only(top: unlimited != null ? 6.0 : 0.0),
-                child: Text(
-                  'Tokens: ${limited.tokensRemaining}',
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    height: 1.2,
-                  ),
-                ),
-              ),
-          ],
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  hasAny ? Icons.check_circle : Icons.info_outline,
-                  color: Colors.white,
-                  size: 16,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  hasAny ? 'Active' : 'Subscribe to get started',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
+          _balanceLine(
+            'Unlimited',
+            unlimited != null
+                ? _formatUnlimitedRemaining(unlimited.expiresAt!)
+                : '0d 00h 00min',
+          ),
+          const SizedBox(height: 8),
+          _balanceLine(
+            'Limited',
+            '${limited?.tokensRemaining ?? 0} Tokens',
           ),
         ],
       ),
+    );
+  }
+
+  Widget _balanceLine(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          '$label:',
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
     );
   }
 
@@ -227,177 +196,29 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     return null;
   }
 
-  String _formatRemainingDuration(DateTime expiresAt) {
-    final remaining = expiresAt.difference(DateTime.now());
-    if (remaining.isNegative) return 'expired';
-    final days = remaining.inDays;
-    final hours = remaining.inHours.remainder(24);
-    final minutes = remaining.inMinutes.remainder(60);
-    if (days >= 1) return '${days}d ${hours}h';
-    if (hours >= 1) return '${hours}h ${minutes}m';
-    if (minutes >= 1) return '${minutes}m';
-    return '<1m';
+  String _formatUnlimitedRemaining(DateTime expiresAt) {
+    final r = expiresAt.difference(DateTime.now());
+    if (r.isNegative) return '0d 00h 00min';
+    final d = r.inDays;
+    final h = r.inHours.remainder(24);
+    final m = r.inMinutes.remainder(60);
+    return '${d}d ${h.toString().padLeft(2, '0')}h '
+        '${m.toString().padLeft(2, '0')}min';
   }
 
-  // ── Lifetime stats row — 2 cards (pending dropped from old 3-card layout) ──
-  Widget _buildLifetimeStatsRow(WalletState state) {
-    final purchased = state.balance?.wallet?.lifetimeTokensPurchased ?? 0;
-    final consumed = state.balance?.wallet?.lifetimeTokensConsumed ?? 0;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildStatCard(
-              label: 'Lifetime Purchased',
-              value: '$purchased',
-              icon: Icons.all_inclusive,
-              color: Colors.blue,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _buildStatCard(
-              label: 'Lifetime Consumed',
-              value: '$consumed',
-              icon: Icons.flash_on,
-              color: Colors.orange,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatCard({
-    required String label,
-    required String value,
-    required IconData icon,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.08),
-            blurRadius: 6,
-            spreadRadius: 1,
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 15,
-              color: color,
-            ),
-          ),
-          Text(
-            label,
-            style: const TextStyle(fontSize: 11, color: Colors.grey),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Quick actions ──────────────────────────────────────────────────────────
-  Widget _buildQuickActions() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildActionTile(
-              icon: Icons.add_circle_outline,
-              label: 'Subscribe',
-              color: const Color(0xFF00C853),
-              onTap: () => context.push('/top-up'),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildActionTile(
-              icon: Icons.history,
-              label: 'Transactions',
-              color: Colors.blue,
-              onTap: () => context.push('/transaction-history'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionTile({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.2)),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 26),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Packages teaser (Q7 — fed from state.packages) ─────────────────────────
-  Widget _buildPackagesTeaser(WalletState state) {
-    final packages = state.packages;
+  // ── Plans section (selectable cards) ────────────────────────────────────────
+  Widget _buildPlansSection(WalletState state, WalletNotifier notifier) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Subscription Plans',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-              ),
-              TextButton(
-                onPressed: () => context.push('/top-up'),
-                child: const Text(
-                  'Subscribe',
-                  style: TextStyle(color: Color(0xFF00C853)),
-                ),
-              ),
-            ],
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 10),
+          child: Text(
+            'Subscription Plans',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
           ),
         ),
-        if (packages.isEmpty)
+        if (state.packages.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Container(
@@ -407,113 +228,307 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Center(
-                child: Text(
-                  'Loading plans...',
-                  style: TextStyle(color: Colors.grey),
-                ),
+                child: Text('Loading plans...',
+                    style: TextStyle(color: Colors.grey)),
               ),
             ),
           )
         else
-          SizedBox(
-            height: 130,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: packages.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (context, i) {
-                final pkg = packages[i];
-                return InkWell(
-                  onTap: () => context.push('/top-up'),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    width: 150,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade200),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.grey.withValues(alpha: 0.07),
-                          blurRadius: 6,
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF00C853)
-                                .withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            pkg.type == SubscriptionType.unlimited
-                                ? 'UNLIMITED'
-                                : 'TOKENS',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Color(0xFF00C853),
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          pkg.name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const Spacer(),
-                        Text(
-                          'KES ${pkg.price}',
-                          style: const TextStyle(
-                            color: Color(0xFF00C853),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+          ...state.packages.map(
+            (pkg) => _buildPlanCard(
+              pkg,
+              state.selectedPackageId == pkg.id,
+              notifier,
             ),
           ),
       ],
     );
   }
 
-  // ── Purchases list (renamed from Token History) ────────────────────────────
-  Widget _buildPurchasesHeader() {
+  Widget _buildPlanCard(
+    SubscriptionPackage pkg,
+    bool isSelected,
+    WalletNotifier notifier,
+  ) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          const Text(
-            'Purchase History',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: InkWell(
+        onTap: () => notifier.selectPackage(pkg.id),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? const Color(0xFF00C853).withValues(alpha: 0.08)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected
+                  ? const Color(0xFF00C853)
+                  : Colors.grey.shade300,
+              width: isSelected ? 2 : 1,
+            ),
           ),
-          TextButton(
-            onPressed: () => context.push('/transaction-history'),
-            child: const Text(
-              'All Transactions',
-              style: TextStyle(color: Color(0xFF00C853)),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00C853).withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  pkg.type == SubscriptionType.unlimited
+                      ? Icons.all_inclusive
+                      : Icons.confirmation_number,
+                  color: const Color(0xFF00C853),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pkg.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                    if (pkg.description != null &&
+                        pkg.description!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          pkg.description!,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    'KES ${pkg.price}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Color(0xFF00C853),
+                    ),
+                  ),
+                  if (isSelected)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Icon(Icons.check_circle,
+                          color: Color(0xFF00C853), size: 18),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Subscribe button + STK poll panel ───────────────────────────────────────
+  Widget _buildSubscribePanel(WalletState state, WalletNotifier notifier) {
+    final polling = state.isPurchasingSubscription ||
+        state.pollStatus == StkPollStatus.polling;
+
+    if (polling) {
+      return _waitPanel(
+        message: 'Check your phone for the M-Pesa PIN prompt. '
+            'Enter your PIN to confirm the payment.',
+        color: Colors.orange,
+        showSpinner: true,
+      );
+    }
+
+    if (state.pollStatus == StkPollStatus.failed) {
+      return _waitPanel(
+        message: 'Payment was not successful. Please try again.',
+        color: Colors.red,
+        showSpinner: false,
+        actions: [
+          _retryButton(state, notifier),
+        ],
+      );
+    }
+
+    if (state.pollStatus == StkPollStatus.timeout) {
+      return _waitPanel(
+        message: "We didn't get a confirmation in time. If you completed the "
+            'M-Pesa PIN, tap "I have paid". Otherwise try again.',
+        color: Colors.orange,
+        showSpinner: false,
+        actions: [
+          _retryButton(state, notifier),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: state.isConfirmingPayment ||
+                      state.pendingPurchase == null
+                  ? null
+                  : () => notifier.confirmPayment(state.pendingPurchase!.id),
+              icon: state.isConfirmingPayment
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.check, color: Colors.orange),
+              label: const Text('I have paid',
+                  style: TextStyle(color: Colors.orange)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.orange),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
             ),
           ),
         ],
+      );
+    }
+
+    // idle / success → show the Subscribe button.
+    final hasSelection = state.selectedPackageId != null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: SizedBox(
+        width: double.infinity,
+        height: 50,
+        child: ElevatedButton(
+          onPressed: hasSelection
+              ? () => notifier.subscribeAndPoll(
+                    packageId: state.selectedPackageId!,
+                  )
+              : null,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF00C853),
+            disabledBackgroundColor: Colors.grey.shade300,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: const Text(
+            'SUBSCRIBE',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _retryButton(WalletState state, WalletNotifier notifier) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: state.selectedPackageId == null
+            ? null
+            : () => notifier.subscribeAndPoll(
+                  packageId: state.selectedPackageId!,
+                ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF00C853),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+        child: const Text('Try Again',
+            style: TextStyle(color: Colors.white)),
+      ),
+    );
+  }
+
+  Widget _waitPanel({
+    required String message,
+    required Color color,
+    required bool showSpinner,
+    List<Widget> actions = const [],
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              if (showSpinner) ...[
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(color),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ] else ...[
+                Icon(Icons.info_outline, color: color, size: 20),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: Text(message, style: const TextStyle(fontSize: 13)),
+              ),
+            ],
+          ),
+          if (actions.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            ...actions,
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Redeem link ─────────────────────────────────────────────────────────────
+  Widget _buildRedeemLink() {
+    return Center(
+      child: TextButton(
+        onPressed: () => context.push('/redeem-coupon'),
+        child: const Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: 'Have a promo code? ',
+                style: TextStyle(color: Colors.grey),
+              ),
+              TextSpan(
+                text: 'Redeem here',
+                style: TextStyle(
+                  color: Color(0xFF00C853),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Purchase history (compact) ──────────────────────────────────────────────
+  Widget _buildPurchasesHeader() {
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Text(
+        'Purchase History',
+        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -536,29 +551,10 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
         ),
         child: Column(
           children: [
-            Icon(Icons.card_membership, size: 56, color: Colors.grey.shade300),
+            Icon(Icons.receipt_long, size: 48, color: Colors.grey.shade300),
             const SizedBox(height: 12),
-            const Text(
-              'No purchases yet',
-              style: TextStyle(
-                color: Colors.grey,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Subscribe to a plan to start processing transactions',
-              style: TextStyle(color: Colors.grey, fontSize: 12),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => context.push('/top-up'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00C853),
-              ),
-              child: const Text('Subscribe Now'),
-            ),
+            const Text('No purchases yet',
+                style: TextStyle(color: Colors.grey)),
           ],
         ),
       );
@@ -575,16 +571,18 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             child: Center(child: CircularProgressIndicator()),
           );
         }
-        return _buildPurchaseItem(purchases[index], state);
+        return _buildPurchaseItem(purchases[index]);
       },
     );
   }
 
-  Widget _buildPurchaseItem(SubscriptionPurchase purchase, WalletState state) {
+  Widget _buildPurchaseItem(SubscriptionPurchase purchase) {
     final color = _statusColor(purchase.status);
-    final pkgName =
-        ref.read(walletNotifierProvider.notifier).findPackageById(purchase.packageId)?.name ??
-            'Subscription';
+    final pkgName = ref
+            .read(walletNotifierProvider.notifier)
+            .findPackageById(purchase.packageId)
+            ?.name ??
+        'Subscription';
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -594,10 +592,9 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           backgroundColor: color.withValues(alpha: 0.12),
           child: Icon(Icons.add_circle, color: color, size: 20),
         ),
-        title: Text(
-          pkgName,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-        ),
+        title: Text(pkgName,
+            style: const TextStyle(
+                fontWeight: FontWeight.w600, fontSize: 14)),
         subtitle: Text(
           DateFormat('dd MMM yyyy, HH:mm').format(purchase.createdAt),
           style: const TextStyle(fontSize: 12),
@@ -606,19 +603,12 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(
-              'KES ${purchase.amountPaid}',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: color,
-                fontSize: 13,
-              ),
-            ),
+            Text('KES ${purchase.amountPaid}',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, color: color, fontSize: 13)),
             Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 6,
-                vertical: 2,
-              ),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
@@ -626,10 +616,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
               child: Text(
                 purchase.status.name.toUpperCase(),
                 style: TextStyle(
-                  fontSize: 9,
-                  color: color,
-                  fontWeight: FontWeight.bold,
-                ),
+                    fontSize: 9, color: color, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -649,5 +636,39 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       case SubscriptionPurchaseStatus.reversed:
         return Colors.grey;
     }
+  }
+
+  // ── Success dialog ──────────────────────────────────────────────────────────
+  void _showSuccessDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Icon(Icons.check_circle, size: 60, color: Colors.green),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Subscription Active!',
+                style:
+                    TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            SizedBox(height: 10),
+            Text('Your plan is now active.', textAlign: TextAlign.center),
+          ],
+        ),
+        actions: [
+          Center(
+            child: ElevatedButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                ref.read(walletNotifierProvider.notifier).resetPollStatus();
+              },
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00C853)),
+              child: const Text('Done'),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

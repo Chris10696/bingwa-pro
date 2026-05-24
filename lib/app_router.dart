@@ -14,7 +14,7 @@ import 'package:bingwa_pro/features/auth/presentation/screens/verify_phone_scree
 import 'package:bingwa_pro/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:bingwa_pro/features/settings/presentation/screens/settings_screen.dart';
 import 'package:bingwa_pro/features/transactions/presentation/screens/transaction_history_screen.dart';
-import 'package:bingwa_pro/features/wallet/presentation/screens/topup_screen.dart';
+import 'package:bingwa_pro/features/wallet/presentation/screens/redeem_coupon_screen.dart';
 import 'package:bingwa_pro/features/wallet/presentation/screens/wallet_screen.dart';
 import 'package:bingwa_pro/features/offers/presentation/screens/offers_screen.dart';
 import 'package:bingwa_pro/features/customers/presentation/screens/customers_screen.dart';
@@ -48,6 +48,7 @@ class AppRoutes {
   static const String dashboard = '/dashboard';
   static const String wallet = '/wallet';
   static const String topUp = '/top-up';
+  static const String redeemCoupon = '/redeem-coupon';
   // W1: airtime, data, sms route constants removed (screens deleted)
   static const String transactionHistory = '/transaction-history';
   static const String settings = '/settings';
@@ -234,24 +235,25 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
-        path: AppRoutes.topUp,
-        name: 'topUp',
+        path: AppRoutes.redeemCoupon,
+        name: 'redeemCoupon',
         pageBuilder: (context, state) => CustomTransitionPage<void>(
           key: state.pageKey,
-          child: const TopUpScreen(),
+          child: const RedeemCouponScreen(),
           transitionsBuilder: AppTransitions.slideTransition,
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
+      // W2.4A: topup merged into wallet — these paths now alias to /wallet so
+      // any lingering goToTopUp()/push('/top-up') calls land on the wallet
+      // screen. TopUpScreen is deleted.
+      GoRoute(
+        path: AppRoutes.topUp,
+        redirect: (context, state) => AppRoutes.wallet,
+      ),
       GoRoute(
         path: AppRoutes.walletTopUp,
-        name: 'walletTopUp',
-        pageBuilder: (context, state) => CustomTransitionPage<void>(
-          key: state.pageKey,
-          child: const TopUpScreen(),
-          transitionsBuilder: AppTransitions.slideTransition,
-          transitionDuration: const Duration(milliseconds: 350),
-        ),
+        redirect: (context, state) => AppRoutes.wallet,
       ),
 
       // ======================================================================
@@ -466,6 +468,7 @@ extension GoRouterExtension on BuildContext {
   void goToDashboard() => go(AppRoutes.dashboard);
   void goToWallet() => go(AppRoutes.wallet);
   void goToTopUp() => go(AppRoutes.topUp);
+  void goToRedeemCoupon() => go(AppRoutes.redeemCoupon);
   void goToTransactionHistory() => go(AppRoutes.transactionHistory);
   void goToSettings() => go(AppRoutes.settings);
   void goToProfile() => go(AppRoutes.profile);
