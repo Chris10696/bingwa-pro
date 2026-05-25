@@ -26,7 +26,6 @@ import 'package:bingwa_pro/features/sitelink/presentation/screens/sitelink_scree
 import 'package:bingwa_pro/features/auto_reply/presentation/screens/auto_reply_screen.dart';
 import 'package:bingwa_pro/features/customers/presentation/screens/customer_detail_screen.dart';
 import 'package:bingwa_pro/features/settings/presentation/screens/edit_profile_screen.dart';
-import 'package:bingwa_pro/features/settings/presentation/screens/till_registration_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -65,7 +64,6 @@ class AppRoutes {
   static const String autoReply = '/auto-reply';
   // Settings sub-routes
   static const String editProfile = '/settings/profile';
-  static const String paymentSettings = '/settings/payment';
   // Root
   static const String root = '/';
 }
@@ -405,16 +403,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           transitionDuration: const Duration(milliseconds: 350),
         ),
       ),
-      GoRoute(
-        path: AppRoutes.paymentSettings,
-        name: 'paymentSettings',
-        pageBuilder: (context, state) => CustomTransitionPage<void>(
-          key: state.pageKey,
-          child: const TillRegistrationScreen(),
-          transitionsBuilder: AppTransitions.slideTransition,
-          transitionDuration: const Duration(milliseconds: 350),
-        ),
-      ),
     ],
 
     errorBuilder: (context, state) {
@@ -473,7 +461,6 @@ extension GoRouterExtension on BuildContext {
   void goToSettings() => go(AppRoutes.settings);
   void goToProfile() => go(AppRoutes.profile);
   void goToEditProfile() => go(AppRoutes.editProfile);
-  void goToPaymentSettings() => go(AppRoutes.paymentSettings);
   void goToOffers() => go(AppRoutes.offers);
   void goToCustomers() => go(AppRoutes.customers);
   void goToCustomerDetails(String customerId) => go('/customers/$customerId');

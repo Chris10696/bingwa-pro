@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:line_icons/line_icons.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
 import '../../../../core/security/secure_storage_manager.dart';
+import '../../../wallet/presentation/providers/wallet_provider.dart';
+import '../../../../shared/models/wallet_model.dart' show ProcessingMode;
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -20,9 +22,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _notificationsEnabled = true;
   bool _transactionSounds = true;
   String _language = 'English';
-  String _theme = 'Light';
-  double _transactionLimit = 5000.0;
-  double _dailyLimit = 100000.0;
 
   @override
   void initState() {
@@ -36,6 +35,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() {
       _biometricEnabled = biometricEnabled;
     });
+
+    // W2.4D: ensure wallet balance is loaded so Processing Mode reflects state.
+    ref.read(walletNotifierProvider.notifier).loadWalletData();
+  }
+
+  void _comingSoon(String feature) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$feature is coming in a later update')),
+    );
+  }
+
+  Widget _buildProcessingModeCard() {
+    final balance = ref.watch(walletNotifierProvider).balance;
+    final current = balance?.wallet?.processingMode ?? ProcessingMode.express;
+    return _buildSettingsCard([
+      RadioListTile<ProcessingMode>(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        activeColor: const Color(0xFF00C853),
+        title: const Text('Express'),
+        subtitle: const Text('Direct USSD dial (default)'),
+        value: ProcessingMode.express,
+        groupValue: current,
+        onChanged: (v) => _setProcessingMode(v),
+      ),
+      RadioListTile<ProcessingMode>(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        activeColor: const Color(0xFF00C853),
+        title: const Text('Advanced'),
+        subtitle: const Text('Menu navigation (requires accessibility — coming in a later update)'),
+        value: ProcessingMode.advanced,
+        groupValue: current,
+        onChanged: (v) => _setProcessingMode(v),
+      ),
+    ]);
+  }
+
+  Future<void> _setProcessingMode(ProcessingMode? mode) async {
+    if (mode == null) return;
+    await ref.read(walletNotifierProvider.notifier).setProcessingMode(mode);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Processing mode set to ${mode.name}'),
+        backgroundColor: const Color(0xFF00C853),
+      ),
+    );
   }
 
   @override
@@ -53,28 +98,41 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _buildProfileSection(agent),
           const SizedBox(height: 20),
 
-          // ===== PAYMENT SETTINGS SECTION (ADDED) =====
-          _buildSectionHeader('Payment Settings'),
+          // ===== W2.4D: Payment Settings (till/paybill) removed (D-W2-4).
+          // Replaced with Hybrid-ordered service section: SIM Setup,
+          // Message Processing, Processing Mode. Deferred items show
+          // "Coming soon" until their wave.
+          _buildSectionHeader('Agent Tools'),
           _buildSettingsCard([
             _buildSettingsItem(
-              icon: Icons.store,
-              title: 'Payment Method',
-              subtitle: agent?.tillNumber != null 
-                  ? 'Till: ${agent!.tillNumber}' 
-                  : 'Set up your till/paybill number',
-              onTap: () {
-                context.push('/settings/payment');
-              },
+              icon: Icons.sim_card,
+              title: 'SIM Setup',
+              subtitle: 'Coming in a later update',
+              onTap: () => _comingSoon('SIM Setup'),
+            ),
+            _buildSettingsItem(
+              icon: Icons.sms,
+              title: 'Message Processing',
+              subtitle: 'Coming in a later update',
+              onTap: () => _comingSoon('Message Processing'),
+            ),
+            _buildSettingsItem(
+              icon: Icons.people_outline,
+              title: 'My Customers',
+              subtitle: 'View and manage customers',
+              onTap: () => context.push('/customers'),
             ),
             _buildSettingsItem(
               icon: Icons.history,
               title: 'Transaction History',
               subtitle: 'View all your transactions',
-              onTap: () {
-                context.push('/transaction-history');
-              },
+              onTap: () => context.push('/transaction-history'),
             ),
           ]),
+          const SizedBox(height: 20),
+          // Processing Mode (Express / Advanced) — wired to wallet provider.
+          _buildSectionHeader('Processing Mode'),
+          _buildProcessingModeCard(),
           const SizedBox(height: 20),
 
           // Account Settings

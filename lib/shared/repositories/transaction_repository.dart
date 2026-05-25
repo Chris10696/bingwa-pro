@@ -228,20 +228,48 @@ class TransactionRepository {
     return response;
   }
 
-  // W2.F: GET /transactions/scheduled.
+  // W2.F: GET /transactions/scheduled. amount is a Postgres decimal → arrives
+  // as either a number (50) or a string ("49.00"); parse tolerantly.
   Future<List<ScheduledTransaction>> getScheduled() async {
     final response = await _dio.get(ApiConstants.scheduledTransactions);
     final list = (response.data['scheduled'] as List<dynamic>?) ?? const [];
-    return list
-        .map((e) => ScheduledTransaction.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return list.map((e) {
+      final m = e as Map<String, dynamic>;
+      return ScheduledTransaction(
+        id: m['id'] as String,
+        agentId: m['agentId'] as String,
+        offerId: m['offerId'] as String?,
+        offerName: m['offerName'] as String?,
+        customerPhone: m['customerPhone'] as String? ?? '',
+        amount: _toDouble(m['amount']),
+        rescheduleInfo: m['rescheduleInfo'] as Map<String, dynamic>?,
+        createdAt: DateTime.parse(m['createdAt'] as String),
+      );
+    }).toList();
+  }
+
+  // Tolerant numeric parse: backend decimals come as String, ints as num.
+  double _toDouble(dynamic v) {
+    if (v == null) return 0.0;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString()) ?? 0.0;
   }
 
   // W2.F: POST /transactions/schedule.
   Future<ScheduledTransaction> schedule(ScheduleTransactionRequest req) async {
     final response =
         await _dio.post(ApiConstants.scheduleTransaction, data: req.toJson());
-    return ScheduledTransaction.fromJson(response.data as Map<String, dynamic>);
+    final m = response.data as Map<String, dynamic>;
+    return ScheduledTransaction(
+      id: m['id'] as String,
+      agentId: m['agentId'] as String,
+      offerId: m['offerId'] as String?,
+      offerName: m['offerName'] as String?,
+      customerPhone: m['customerPhone'] as String? ?? '',
+      amount: _toDouble(m['amount']),
+      rescheduleInfo: m['rescheduleInfo'] as Map<String, dynamic>?,
+      createdAt: DateTime.parse(m['createdAt'] as String),
+    );
   }
 
   // W2.F: DELETE /transactions/scheduled/:id.
