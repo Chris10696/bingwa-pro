@@ -1,7 +1,8 @@
 // lib/features/quick_dial/presentation/screens/quick_dial_screen.dart
-// W2.4C: Hybrid "Quick Dial" — customer phone field + offer chip grid (3-col)
-// + green dial button. Backend-first via quickDialNotifier.dial(); Express
-// dial through the native engine. Reuses the offers list from offersNotifier.
+// W2.4C → W3.L: Hybrid "Quick Dial" — customer phone field + offer chip grid
+// (3-col) + green dial button. Backend-first via quickDialNotifier.dial();
+// the dial now runs through the REAL pipeline (W3.L) and the result is shown
+// in a UssdResponseDialog (Hybrid parity) instead of a fire-and-forget snackbar.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,16 +12,14 @@ import '../../../../core/widgets/loading_indicator.dart';
 import '../../../../shared/models/offer_model.dart';
 import '../../../offers/presentation/providers/offer_provider.dart';
 import '../providers/quick_dial_provider.dart';
-
 class QuickDialScreen extends ConsumerStatefulWidget {
   const QuickDialScreen({super.key});
   @override
   ConsumerState<QuickDialScreen> createState() => _QuickDialScreenState();
 }
-
 class _QuickDialScreenState extends ConsumerState<QuickDialScreen> {
   final _phoneController = TextEditingController();
-
+  bool _resultDialogOpen = false;
   @override
   void initState() {
     super.initState();
@@ -29,51 +28,55 @@ class _QuickDialScreenState extends ConsumerState<QuickDialScreen> {
       ref.read(offersNotifierProvider.notifier).loadOffers();
     });
   }
-
   @override
   void dispose() {
     _phoneController.dispose();
     super.dispose();
   }
-
   @override
   Widget build(BuildContext context) {
     final offersState = ref.watch(offersNotifierProvider);
     final dialState = ref.watch(quickDialNotifierProvider);
     final dialNotifier = ref.read(quickDialNotifierProvider.notifier);
-
-    // React to terminal phases.
+    // React to state transitions.
     ref.listen<QuickDialState>(quickDialNotifierProvider, (prev, next) {
-      if (prev?.phase != next.phase) {
-        if (next.phase == QuickDialPhase.success) {
+      // W3.L: terminal pipeline result → UssdResponseDialog (Hybrid parity).
+      if (next.showResultDialog && !_resultDialogOpen) {
+        _resultDialogOpen = true;
+        _showUssdResponseDialog(
+          success: next.dialedSuccess,
+          response: next.ussdResponse ?? '',
+          onClose: () {
+            _resultDialogOpen = false;
+            dialNotifier.dismissResultDialog();
+            if (next.dialedSuccess) _phoneController.clear();
+          },
+        );
+        return;
+      }
+      // Errors that are NOT a terminal pipeline result (validation, 402, enqueue
+      // failure) — surface inline as before.
+      if (prev?.phase != next.phase &&
+          next.phase == QuickDialPhase.error &&
+          !next.showResultDialog &&
+          next.errorMessage != null) {
+        if (next.needsSubscription) {
+          _showSubscribePrompt(next.errorMessage!);
+        } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              backgroundColor: Colors.green,
-              content: Text('Dialing started — complete it on the dialer.'),
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text(next.errorMessage!),
             ),
           );
-          dialNotifier.reset();
-        } else if (next.phase == QuickDialPhase.error &&
-            next.errorMessage != null) {
-          if (next.needsSubscription) {
-            _showSubscribePrompt(next.errorMessage!);
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                backgroundColor: Colors.red,
-                content: Text(next.errorMessage!),
-              ),
-            );
-          }
-          dialNotifier.reset();
         }
+        dialNotifier.reset();
       }
     });
 
     // Active offers only — inactive offers can't be dialed (Hybrid parity).
     final dialableOffers =
         offersState.offers.where((o) => o.isActive).toList();
-
     return Scaffold(
       appBar: const CustomAppBar(title: 'Quick Dial', showBackButton: true),
       body: Column(
@@ -92,7 +95,6 @@ class _QuickDialScreenState extends ConsumerState<QuickDialScreen> {
       ),
     );
   }
-
   Widget _buildPhoneField(QuickDialNotifier notifier) {
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -112,7 +114,6 @@ class _QuickDialScreenState extends ConsumerState<QuickDialScreen> {
       ),
     );
   }
-
   Widget _buildEmpty() {
     return Center(
       child: Column(
@@ -216,7 +217,6 @@ class _QuickDialScreenState extends ConsumerState<QuickDialScreen> {
         return Icons.sim_card;
     }
   }
-
   Widget _buildDialButton(QuickDialState state, QuickDialNotifier notifier) {
     final canDial = state.selectedOffer != null && !state.isBusy;
     final label = switch (state.phase) {
@@ -260,6 +260,48 @@ class _QuickDialScreenState extends ConsumerState<QuickDialScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// W3.L — Hybrid's UssdResponseDialog: shows the live pipeline result
+  /// (success/failure + the captured USSD response text) the agent watches.
+  void _showUssdResponseDialog({
+    required bool success,
+    required String response,
+    required VoidCallback onClose,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              success ? Icons.check_circle : Icons.error,
+              color: success ? const Color(0xFF00C853) : Colors.red,
+            ),
+            const SizedBox(width: 8),
+            Text(success ? 'Success' : 'Failed'),
+          ],
+        ),
+        content: Text(
+          response.isEmpty
+              ? (success ? 'Request successful' : 'Request failed')
+              : response,
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00C853),
+            ),
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              onClose();
+            },
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }

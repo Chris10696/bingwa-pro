@@ -2,153 +2,232 @@
 package com.example.bingwa_pro
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.AccessibilityServiceInfo
-import android.content.Intent
-import android.os.Bundle  // ADD THIS MISSING IMPORT
-import android.os.Handler
-import android.os.Looper
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import java.util.Locale
 
+/**
+ * W3.C — Advanced-mode USSD automation, a verbatim behavioral port of Hybrid's
+ * UssdAccessibilityService. This REPLACES the old hardcoded-English-menu-string version.
+ *
+ * How Advanced works end-to-end:
+ *   1. UssdEngine.dialAdvancedCapturing extracts the steps (UssdUtils.extractSteps), pushes
+ *      the menu-reply steps into UssdStepsRepository, dials the first step (*BASE#) via
+ *      ACTION_CALL, and awaits UssdSessionManager.
+ *   2. As each Safaricom USSD dialog appears, the framework delivers an AccessibilityEvent
+ *      here. We recognise a USSD dialog (isUSSDWidget), and:
+ *        - if it has an input field and steps remain → type the next step + tap SEND;
+ *        - if it has an input field but no steps remain → read the text, dismiss, complete;
+ *        - if it has no input field and exactly one button (final dialog) → read the text,
+ *          tap the button, complete.
+ *   3. completeSession runs the final text through UssdUtils.isSuccessfulResponse to mark
+ *      the session Success or Failure, which unblocks the dialer coroutine.
+ *
+ * Gating: we only act when the agent's processing mode is ADVANCED (read from SessionBridge —
+ * the same native mirror the background worker uses) AND a session is active. Otherwise every
+ * event is ignored, so this service is inert for Express agents and when nothing is dialing.
+ *
+ * Hilt note: Hybrid constructor-injects sessionManager/stepsRepository/settingsRepository.
+ * The framework instantiates accessibility services directly, so we reach the same singletons
+ * via Kotlin objects (UssdSessionManager / UssdStepsRepository) and read the mode from
+ * SessionBridge. Hybrid's onServiceConnected/onDestroy also post service health to an
+ * AccessibilityRepository (W5 telemetry) — intentionally a no-op here, out of W3 scope.
+ */
 class UssdAccessibilityService : AccessibilityService() {
-    private val TAG = "UssdAccessibility"
-    private val handler = Handler(Looper.getMainLooper())
-    private var currentSessionId: String? = null
-    
+    private val TAG = "UssdA11yService"
+
+    companion object {
+        // Recognised dialog button labels (lowercase). Verbatim from Hybrid.
+        private val BUTTON_TEXTS = listOf("send", "ok", "close", "cancel", "back", "got it", "done")
+    }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Only drive Advanced sessions; inert otherwise (Express agents / idle).
+        if (SessionBridge.getProcessingMode(this) != "advanced") return
+        if (!UssdSessionManager.isSessionActive()) return
+        if (event == null) return
+        if (!isUSSDWidget(event)) return
+
+        if (hasInputField(event)) {
+            if (!UssdStepsRepository.isEmpty()) {
+                val step = UssdStepsRepository.pollStep() ?: return
+                enterText(event, step)
+                clickButton(event, "SEND")
+            } else {
+                // Input field present but no steps left → treat current text as the outcome.
+                val response = getFinalResponse(event)
+                dismissDialog(event)
+                completeSession(response)
+            }
+        } else if (isFinalDialog(event)) {
+            val response = getFinalResponse(event)
+            clickFinalDialogButton(event)
+            completeSession(response)
+        }
+        // No input field and not a final dialog → wait for the next event.
+    }
+
+    override fun onInterrupt() {}
+
     override fun onServiceConnected() {
         super.onServiceConnected()
+        // Hybrid posts "connected" health to an AccessibilityRepository here (W5). No-op in W3.
         Log.d(TAG, "Accessibility service connected")
-        
-        val info = AccessibilityServiceInfo().apply {
-            eventTypes = AccessibilityEvent.TYPES_ALL_MASK
-            feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-            flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-            notificationTimeout = 100
-        }
-        setServiceInfo(info)
     }
-    
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
-        
-        when (event.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                val packageName = event.packageName?.toString() ?: return
-                
-                // Check if this is a USSD window
-                if (packageName.contains("com.android.phone") || 
-                    packageName.contains("com.sec.android.app") ||
-                    packageName.contains("telephony")) {
-                    
-                    Log.d(TAG, "USSD window detected: $packageName")
-                    handleUssdWindow(event)
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Hybrid posts "disconnected" health here (W5). No-op in W3.
+        Log.d(TAG, "Accessibility service destroyed")
+    }
+
+    // ── Session completion (Advanced SUCCESS/FAILED rule) ─────────────────────────────
+    private fun completeSession(response: String) {
+        if (UssdUtils.isSuccessfulResponse(response)) {
+            UssdSessionManager.completeSession(UssdSessionState.Success(response))
+        } else {
+            UssdSessionManager.completeSession(UssdSessionState.Failure(response))
+        }
+    }
+
+    // ── Text entry: try ACTION_SET_TEXT, fall back to clipboard paste (verbatim) ──────
+    private fun enterText(event: AccessibilityEvent, text: String) {
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        for (node in getNodes(event)) {
+            if (node.isEditable && node.isFocusable && node.isEnabled) {
+                if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("text", text))
+                    node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
                 }
+                break
             }
         }
     }
-    
-    private fun handleUssdWindow(event: AccessibilityEvent) {
+
+    // ── Button taps (verbatim): SEND → last button, CANCEL → second-to-last ───────────
+    private fun clickButton(event: AccessibilityEvent, label: String) {
+        val buttons = getNodes(event).filter { isButton(it) }
+        if (buttons.isEmpty()) return
+        when (label) {
+            "SEND" -> buttons.lastOrNull()?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            "CANCEL" -> if (buttons.size > 1) {
+                buttons[buttons.size - 2].performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
+        }
+    }
+
+    /** Final (single-button) dialog → click the first/only button. */
+    private fun clickFinalDialogButton(event: AccessibilityEvent) {
+        getNodes(event).firstOrNull { isButton(it) }?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
+
+    /** Dismiss every recognised button on the current event's dialog (verbatim). */
+    private fun dismissDialog(event: AccessibilityEvent) {
+        getNodes(event).asSequence()
+            .filter { isButton(it) }
+            .filter { node ->
+                BUTTON_TEXTS.any { bt ->
+                    node.text?.toString()?.lowercase(Locale.getDefault())?.contains(bt) == true
+                }
+            }
+            .forEach { it.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+    }
+
+    /**
+     * Hybrid-parity helper: dismiss buttons on the *active window root* (not a specific event).
+     * Currently only the event-based dismissDialog is used by the state machine; this mirrors
+     * Hybrid's surface and may be wired by a later wave.
+     */
+    @Suppress("unused")
+    private fun dismissCurrentDialog() {
         val root = rootInActiveWindow ?: return
-        
-        // Find the USSD message text
-        val messageNode = findMessageNode(root)
-        if (messageNode != null) {
-            val messageText = messageNode.text?.toString() ?: ""
-            Log.d(TAG, "USSD Message: $messageText")
-            
-            // Parse the response
-            when {
-                messageText.contains("CON") -> {
-                    // Need user input - we can automate based on context
-                    handleContinuation(messageText, root)
-                }
-                messageText.contains("END") -> {
-                    // Session ended
-                    Log.d(TAG, "USSD session ended")
-                    currentSessionId = null
-                }
-                messageText.contains("Enter") || messageText.contains("Select") -> {
-                    // Need input - send appropriate response
-                    handleInputRequired(messageText, root)
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        extractNodes(nodes, root)
+        nodes.asSequence()
+            .filter { isButton(it) }
+            .filter { node ->
+                BUTTON_TEXTS.any { bt ->
+                    node.text?.toString()?.lowercase(Locale.getDefault())?.contains(bt) == true
                 }
             }
-        }
+            .forEach { it.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
     }
-    
-    private fun findMessageNode(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        // Look for text in the window
-        if (node.text != null && node.text!!.isNotEmpty()) {
-            return node
-        }
-        
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            val result = findMessageNode(child)
-            if (result != null) return result
-            child.recycle()
-        }
-        
-        return null
+
+    // ── Dialog inspection helpers (all verbatim from Hybrid) ──────────────────────────
+
+    private fun isButton(node: AccessibilityNodeInfo): Boolean {
+        val cls = node.className?.toString()?.lowercase(Locale.getDefault()) ?: return false
+        return cls.contains("button")
     }
-    
-    private fun handleContinuation(message: String, root: AccessibilityNodeInfo) {
-        // For advanced USSD, we may need to send specific inputs
-        // This is where you'd map the response to the next step
-        Log.d(TAG, "USSD continuation needed: $message")
-    }
-    
-    private fun handleInputRequired(message: String, root: AccessibilityNodeInfo) {
-        // Find input field and send appropriate response
-        val inputField = findInputField(root)
-        if (inputField != null) {
-            // Determine what input to send based on context
-            val response = determineResponse(message)
-            if (response != null) {
-                setText(inputField, response)
-                performAction(inputField, AccessibilityNodeInfo.ACTION_FOCUS)
-                performAction(inputField, AccessibilityNodeInfo.ACTION_CLICK)
+
+    private fun hasInputField(event: AccessibilityEvent): Boolean =
+        getNodes(event).any { it.isEditable && it.isFocusable && it.isEnabled }
+
+    /** A "final" USSD dialog has exactly one button (no input + just an acknowledge button). */
+    private fun isFinalDialog(event: AccessibilityEvent): Boolean =
+        getNodes(event).count { isButton(it) } == 1
+
+    /** A dialog is a USSD widget if any of its texts is exactly a known button label. */
+    private fun isUSSDWidget(event: AccessibilityEvent): Boolean =
+        collectAllTexts(event).any { it.lowercase(Locale.getDefault()) in BUTTON_TEXTS }
+
+    /** The response text = all dialog texts minus button labels, joined and trimmed. */
+    private fun getFinalResponse(event: AccessibilityEvent): String =
+        collectAllTexts(event)
+            .filterNot { it.lowercase(Locale.getDefault()).trim() in BUTTON_TEXTS }
+            .joinToString(" ")
+            .trim()
+
+    /**
+     * Gather every visible text from three sources, de-duplicated (verbatim from Hybrid):
+     *   1. event.text
+     *   2. the active-window root node tree (text + contentDescription + hintText)
+     *   3. the event source node tree (text + contentDescription + hintText)
+     */
+    private fun collectAllTexts(event: AccessibilityEvent): List<String> {
+        val eventTexts = event.text.map { it.toString().trim() }.filter { it.isNotEmpty() }
+
+        val rootTexts = mutableListOf<String>()
+        rootInActiveWindow?.let { root ->
+            val nodes = mutableListOf<AccessibilityNodeInfo>()
+            extractNodes(nodes, root)
+            for (n in nodes) {
+                n.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { rootTexts.add(it) }
+                n.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { rootTexts.add(it) }
+                n.hintText?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { rootTexts.add(it) }
             }
         }
+
+        val sourceTexts = mutableListOf<String>()
+        for (n in getNodes(event)) {
+            n.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { sourceTexts.add(it) }
+            n.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { sourceTexts.add(it) }
+            n.hintText?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { sourceTexts.add(it) }
+        }
+
+        return (eventTexts + rootTexts + sourceTexts).filter { it.isNotEmpty() }.distinct()
     }
-    
-    private fun findInputField(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        if (node.isEditable) return node
-        
+
+    /** All nodes reachable from the event's source. */
+    private fun getNodes(event: AccessibilityEvent): List<AccessibilityNodeInfo> {
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        event.source?.let { extractNodes(nodes, it) }
+        return nodes
+    }
+
+    /** Depth-first flatten of a node subtree. */
+    private fun extractNodes(out: MutableList<AccessibilityNodeInfo>, node: AccessibilityNodeInfo) {
+        out.add(node)
         for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            val result = findInputField(child)
-            if (result != null) return result
-            child.recycle()
+            node.getChild(i)?.let { extractNodes(out, it) }
         }
-        
-        return null
-    }
-    
-    private fun determineResponse(message: String): String? {
-        // Map USSD message to appropriate response
-        return when {
-            message.contains("1. Buy Airtime") -> "1"
-            message.contains("2. Buy Data") -> "2"
-            message.contains("3. Buy SMS") -> "3"
-            message.contains("4. Check Balance") -> "4"
-            message.contains("Confirm") -> "1"
-            else -> null
-        }
-    }
-    
-    private fun setText(node: AccessibilityNodeInfo, text: String) {
-        val arguments = Bundle()
-        arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-        node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-    }
-    
-    private fun performAction(node: AccessibilityNodeInfo, action: Int) {
-        node.performAction(action)
-    }
-    
-    override fun onInterrupt() {
-        Log.d(TAG, "Accessibility service interrupted")
     }
 }

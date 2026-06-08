@@ -1,17 +1,18 @@
 // lib/shared/repositories/offer_repository.dart
 // W2: reshaped to new Offer fields. categoryId→type, ussdTemplate→ussdCode,
 // dropped validityLabel + client agentId (JWT-derived). getCategories() removed.
+// W3.H: updateOffer extended with the 7 Offer Settings fields (retry/reschedule/
+// timeout) so the Offer Settings screen can partial-PATCH them. relayDevice is
+// intentionally NOT exposed (W5).
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/network/dio_client.dart';
 import '../../core/constants/api_constants.dart';
 import '../../core/utils/logger.dart';
 import '../models/offer_model.dart';
-
 class OfferRepository {
   final Dio _dio;
   OfferRepository(this._dio);
-
   /// GET /offers — agent-scoped (backend filters by JWT).
   Future<List<Offer>> getOffers({
     OfferType? type,
@@ -35,7 +36,6 @@ class OfferRepository {
       rethrow;
     }
   }
-
   Future<Offer> getOfferById(String id) async {
     try {
       final response = await _dio.get('${ApiConstants.offers}/$id');
@@ -45,7 +45,6 @@ class OfferRepository {
       rethrow;
     }
   }
-
   /// POST /offers — agentId derived from JWT server-side.
   Future<Offer> createOffer({
     required String name,
@@ -70,7 +69,13 @@ class OfferRepository {
     }
   }
 
-  /// PATCH /offers/:id — partial update; also used for toggle-active.
+  /// PATCH /offers/:id — partial update; also used for toggle-active and (W3.H)
+  /// for the Offer Settings fields. Only non-null params are sent, so each
+  /// settings change can patch a single field (Hybrid auto-saves per change).
+  ///
+  /// W3.H note: [ussdTimeoutMillis] is the already-converted value (the Offer
+  /// Settings screen multiplies its seconds stepper by 1000 before calling).
+  /// [relayDevice] is intentionally absent (W5).
   Future<Offer> updateOffer(
     String id, {
     String? name,
@@ -78,6 +83,14 @@ class OfferRepository {
     int? price,
     OfferType? type,
     bool? isActive,
+    // W3.H Offer Settings fields:
+    bool? autoReschedule,
+    String? autoRescheduleRunTime,
+    bool? autoRetry,
+    bool? autoRetryConnectionProblems,
+    int? numberOfRetries,
+    int? retryIntervalMins,
+    int? ussdTimeoutMillis,
   }) async {
     try {
       final body = <String, dynamic>{};
@@ -86,6 +99,17 @@ class OfferRepository {
       if (price != null) body['price'] = price;
       if (type != null) body['type'] = type.toBackendValue();
       if (isActive != null) body['isActive'] = isActive;
+      if (autoReschedule != null) body['autoReschedule'] = autoReschedule;
+      if (autoRescheduleRunTime != null) {
+        body['autoRescheduleRunTime'] = autoRescheduleRunTime;
+      }
+      if (autoRetry != null) body['autoRetry'] = autoRetry;
+      if (autoRetryConnectionProblems != null) {
+        body['autoRetryConnectionProblems'] = autoRetryConnectionProblems;
+      }
+      if (numberOfRetries != null) body['numberOfRetries'] = numberOfRetries;
+      if (retryIntervalMins != null) body['retryIntervalMins'] = retryIntervalMins;
+      if (ussdTimeoutMillis != null) body['ussdTimeoutMillis'] = ussdTimeoutMillis;
       final response = await _dio.patch('${ApiConstants.offers}/$id', data: body);
       return Offer.fromJson(response.data as Map<String, dynamic>);
     } on DioException catch (e) {
@@ -93,10 +117,8 @@ class OfferRepository {
       rethrow;
     }
   }
-
   Future<Offer> toggleActive(String id, bool isActive) =>
       updateOffer(id, isActive: isActive);
-
   Future<void> deleteOffer(String id) async {
     try {
       await _dio.delete('${ApiConstants.offers}/$id');
@@ -106,7 +128,6 @@ class OfferRepository {
     }
   }
 }
-
 final offerRepositoryProvider = Provider<OfferRepository>((ref) {
   final dio = ref.watch(dioClientProvider);
   return OfferRepository(dio);

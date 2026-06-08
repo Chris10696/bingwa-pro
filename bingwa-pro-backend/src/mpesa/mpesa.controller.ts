@@ -1,14 +1,12 @@
+// bingwa-pro-backend/src/mpesa/mpesa.controller.ts
 import { Controller, Post, Get, Body, Param, Query, UseGuards, HttpCode, HttpStatus, Req } from '@nestjs/common';
-import { MpesaService } from './mpesa.service';  // This import is correct
+import { MpesaService } from './mpesa.service';
 import { StkPushRequestDto } from './dto/stk-push-request.dto';
-import { MpesaCallbackDto } from './dto/mpesa-callback.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
-
 @Controller('mpesa')
 export class MpesaController {
   constructor(private readonly mpesaService: MpesaService) {}
-
   /**
    * Initiate STK Push (protected endpoint for agents)
    */
@@ -19,20 +17,20 @@ export class MpesaController {
     const agentId = req.user.sub;
     return this.mpesaService.initiateStkPush(requestDto, agentId);
   }
-
   /**
-   * M-Pesa callback endpoint (public - called by Safaricom)
+   * M-Pesa callback endpoint (public - called by Safaricom).
+   * FIX: bind the RAW body (`any`) so the global ValidationPipe doesn't strip
+   * Daraja's PascalCase fields before the handler sees them.
    */
   @Post('callback')
   @HttpCode(HttpStatus.OK)
-  async handleCallback(@Body() callbackDto: MpesaCallbackDto) {
-    await this.mpesaService.handleCallback(callbackDto);
-    return { 
-      ResultCode: 0, 
-      ResultDesc: 'Success' 
+  async handleCallback(@Body() body: any) {
+    await this.mpesaService.handleCallback(body);
+    return {
+      ResultCode: 0,
+      ResultDesc: 'Success',
     };
   }
-
   /**
    * Query transaction status
    */
@@ -41,7 +39,6 @@ export class MpesaController {
   async queryStatus(@Param('checkoutRequestId') checkoutRequestId: string) {
     return this.mpesaService.queryStatus(checkoutRequestId);
   }
-
   /**
    * Get transaction details
    */
@@ -50,7 +47,6 @@ export class MpesaController {
   async getTransaction(@Param('id') id: string) {
     return this.mpesaService.getTransaction(id);
   }
-
   /**
    * Get agent's M-Pesa transactions
    */
@@ -63,7 +59,6 @@ export class MpesaController {
     const agentId = req.user.sub;
     return this.mpesaService.getAgentTransactions(agentId, limit ? parseInt(limit) : 50);
   }
-
   /**
    * Simulate callback (sandbox only)
    */

@@ -1,10 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- C:\bingwa_pro\android\app\src\main\res\xml\accessibility_service_config.xml -->
+<!--
+  W3.C: hardened to match Hybrid's ussd_accessibility_service.xml.
+  - eventTypes 0x821 = typeViewClicked | typeWindowStateChanged | typeWindowContentChanged
+  - flags 0x51 = flagDefault | flagReportViewIds | flagRetrieveInteractiveWindows
+  - feedbackGeneric, notificationTimeout=100, canRetrieveWindowContent=true
+  - packageNames: Hybrid's verbatim dialer/phone allowlist so the service ONLY observes
+    the dialer UI (where USSD menu dialogs render), never the rest of the system. This is
+    both the parity-correct scope and a privacy/perf safeguard.
+  canPerformGestures is retained from Pro's prior config (harmless; Hybrid omits it).
+-->
 <accessibility-service
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeViewClicked|typeViewFocused|typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityEventTypes="typeViewClicked|typeWindowStateChanged|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:accessibilityFlags="flagDefault|flagReportViewIds|flagRetrieveInteractiveWindows"
     android:canPerformGestures="true"
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"
-    android:notificationTimeout="100" />
+    android:notificationTimeout="100"
+    android:packageNames="com.android.dialer,com.google.android.dialer,com.samsung.android.dialer,com.android.phone,com.android.incallui,com.android.contacts,com.motorola.dialer,com.lge.dialer,com.hb.dialer.free,com.modoohut.dialer,com.contapps.android.dialer,com.truecaller,com.truecaller.callerid.callername,com.shsh.android.atakephone,com.luz.contactdialer,com.ivp.call.screen,com.transsion.smartcaller,com.artostolab.voicedialer,com.revesoft.mobiledialer.plus2call.onyx" />

@@ -2,23 +2,24 @@
 // W2.4B: Hybrid "My Offers" manager.
 //   - Filter chips: All / Data / Minutes(VOICE) / SMS
 //   - Rows: globe icon + green name + grey USSD code + price + active toggle
-//     + delete affordance; tap row = edit dialog (prefilled)
-//   - FAB → type-picker → create dialog (shared with edit)
-//   - USSD field: hint + light validation matching backend regex
-//     (^\*[\d*]+BH[\d*]*#$ shape: starts *, ends #, contains BH)
+//     + delete affordance; tap row = Edit Offer screen (prefilled)
+//   - FAB → type-picker → Edit Offer screen (add mode)
+// W3.H (D-W3-10b): the W2 edit *dialog* is replaced by the full EditOfferScreen
+//   (Name/USSD/Price/Activate/Delete/Update + gear → Offer Settings). Tapping a
+//   row pushes it in edit mode; the FAB type-picker pushes it in add mode. The
+//   USSD validation now lives on that screen.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
 import '../../../../core/widgets/loading_indicator.dart';
 import '../../../../shared/models/offer_model.dart';
 import '../providers/offer_provider.dart';
-
+import 'edit_offer_screen.dart';
 class OffersScreen extends ConsumerStatefulWidget {
   const OffersScreen({super.key});
   @override
   ConsumerState<OffersScreen> createState() => _OffersScreenState();
 }
-
 class _OffersScreenState extends ConsumerState<OffersScreen> {
   @override
   void initState() {
@@ -27,12 +28,10 @@ class _OffersScreenState extends ConsumerState<OffersScreen> {
       ref.read(offersNotifierProvider.notifier).loadOffers();
     });
   }
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(offersNotifierProvider);
     final notifier = ref.read(offersNotifierProvider.notifier);
-
     // Surface mutation errors as a snackbar.
     ref.listen<OffersState>(offersNotifierProvider, (prev, next) {
       if (next.errorMessage != null &&
@@ -46,7 +45,6 @@ class _OffersScreenState extends ConsumerState<OffersScreen> {
         notifier.clearError();
       }
     });
-
     return Scaffold(
       appBar: const CustomAppBar(title: 'My Offers', showBackButton: true),
       floatingActionButton: FloatingActionButton(
@@ -97,7 +95,6 @@ class _OffersScreenState extends ConsumerState<OffersScreen> {
       ),
     );
   }
-
   // ── Body ────────────────────────────────────────────────────────────────────
   Widget _buildBody(OffersState state, OffersNotifier notifier) {
     if (state.isLoading && state.offers.isEmpty) {
@@ -134,7 +131,7 @@ class _OffersScreenState extends ConsumerState<OffersScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       child: InkWell(
-        onTap: () => _showOfferDialog(notifier, existing: offer),
+        onTap: () => _openEditor(existing: offer),
         borderRadius: BorderRadius.circular(10),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -182,7 +179,6 @@ class _OffersScreenState extends ConsumerState<OffersScreen> {
       ),
     );
   }
-
   // ── Type picker (FAB) ───────────────────────────────────────────────────────
   void _showTypePicker(OffersNotifier notifier) {
     showModalBottomSheet(
@@ -196,7 +192,7 @@ class _OffersScreenState extends ConsumerState<OffersScreen> {
               title: Text(type.displayLabel),
               onTap: () {
                 Navigator.pop(sheetCtx);
-                _showOfferDialog(notifier, presetType: type);
+                _openEditor(presetType: type);
               },
             );
         return SafeArea(
@@ -219,154 +215,15 @@ class _OffersScreenState extends ConsumerState<OffersScreen> {
     );
   }
 
-  // ── Create/Edit dialog (shared) ─────────────────────────────────────────────
-  void _showOfferDialog(
-    OffersNotifier notifier, {
-    Offer? existing,
-    OfferType? presetType,
-  }) {
-    final isEdit = existing != null;
-    final nameCtrl = TextEditingController(text: existing?.name ?? '');
-    final ussdCtrl = TextEditingController(text: existing?.ussdCode ?? '');
-    final priceCtrl =
-        TextEditingController(text: existing != null ? '${existing.price}' : '');
-    OfferType type = existing?.type ?? presetType ?? OfferType.data;
-    bool isActive = existing?.isActive ?? true;
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
-      context: context,
-      builder: (dialogCtx) {
-        return StatefulBuilder(
-          builder: (ctx, setLocal) {
-            return AlertDialog(
-              title: Text(isEdit ? 'Edit Offer' : 'New Offer'),
-              content: SingleChildScrollView(
-                child: Form(
-                  key: formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextFormField(
-                        controller: nameCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Name',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (v) => (v == null || v.trim().isEmpty)
-                            ? 'Name is required'
-                            : null,
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: ussdCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'USSD Code',
-                          hintText: '*180*5*2*BH*1*1#',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: _validateUssd,
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: priceCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Price (KES)',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (v) {
-                          final n = int.tryParse(v?.trim() ?? '');
-                          if (n == null || n < 1) return 'Enter a valid price';
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<OfferType>(
-                        initialValue: type,
-                        decoration: const InputDecoration(
-                          labelText: 'Category',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                              value: OfferType.data, child: Text('Data')),
-                          DropdownMenuItem(
-                              value: OfferType.voice, child: Text('Minutes')),
-                          DropdownMenuItem(
-                              value: OfferType.sms, child: Text('SMS')),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) setLocal(() => type = v);
-                        },
-                      ),
-                      const SizedBox(height: 4),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Active'),
-                        value: isActive,
-                        activeThumbColor: const Color(0xFF00C853),
-                        onChanged: (v) => setLocal(() => isActive = v),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogCtx),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF00C853),
-                  ),
-                  onPressed: () async {
-                    if (!formKey.currentState!.validate()) return;
-                    final name = nameCtrl.text.trim();
-                    final ussd = ussdCtrl.text.trim();
-                    final price = int.parse(priceCtrl.text.trim());
-                    Navigator.pop(dialogCtx);
-                    if (isEdit) {
-                      await notifier.updateOffer(
-                        existing.id,
-                        name: name,
-                        ussdCode: ussd,
-                        price: price,
-                        type: type,
-                        isActive: isActive,
-                      );
-                    } else {
-                      await notifier.createOffer(
-                        name: name,
-                        ussdCode: ussd,
-                        price: price,
-                        type: type,
-                        isActive: isActive,
-                      );
-                    }
-                  },
-                  child: Text(isEdit ? 'Save' : 'Create'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+  // ── Navigate to the full Edit/Add Offer screen (W3.H, replaces the dialog) ────
+  void _openEditor({Offer? existing, OfferType? presetType}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            EditOfferScreen(existing: existing, presetType: presetType),
+      ),
     );
-  }
-
-  // Mirrors backend @Matches(/^\*[\d*]+BH[\d*]*#$/): starts *, ends #, has BH.
-  String? _validateUssd(String? v) {
-    final code = v?.trim() ?? '';
-    if (code.isEmpty) return 'USSD code is required';
-    if (!code.startsWith('*') || !code.endsWith('#')) {
-      return 'Must start with * and end with #';
-    }
-    if (!code.contains('BH')) {
-      return 'Must contain the BH placeholder (customer phone)';
-    }
-    return null;
   }
 
   void _confirmDelete(Offer offer, OffersNotifier notifier) {

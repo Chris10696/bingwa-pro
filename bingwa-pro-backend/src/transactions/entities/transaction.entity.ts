@@ -44,6 +44,15 @@ export enum TransactionStatus {
   BLOCKED = 'BLOCKED',
 }
 
+// Postgres returns DECIMAL/NUMERIC as strings to preserve precision; this
+// transformer hands TypeORM real numbers so JSON carries 49, not "49.00"
+// (which the Flutter models cast as `num`).
+const decimalToNumber = {
+  to: (value?: number | null) => value,
+  from: (value?: string | null) =>
+    value === null || value === undefined ? value : parseFloat(value),
+};
+
 @Entity('transactions')
 @Unique(['mpesaTransactionId', 'agentId'])
 export class Transaction {
@@ -63,7 +72,7 @@ export class Transaction {
   @Column({ type: 'enum', enum: TransactionType })
   type: TransactionType;
 
-  @Column('decimal', { precision: 15, scale: 2 })
+  @Column('decimal', { precision: 15, scale: 2, transformer: decimalToNumber  })
   amount: number;
 
   @Column({ nullable: true })
@@ -148,16 +157,16 @@ export class Transaction {
   @Column({ default: 0 })
   tokenAmount: number;
 
-  @Column('decimal', { precision: 15, scale: 2, default: 0 })
+  @Column('decimal', { precision: 15, scale: 2, default: 0, transformer: decimalToNumber  })
   commission: number;
 
   @Column('jsonb', { nullable: true })
   metadata: Record<string, any>;
 
-  @Column('decimal', { precision: 15, scale: 2, nullable: true })
+  @Column('decimal', { precision: 15, scale: 2, nullable: true, transformer: decimalToNumber  })
   balanceBefore: number;
 
-  @Column('decimal', { precision: 15, scale: 2, nullable: true })
+  @Column('decimal', { precision: 15, scale: 2, nullable: true, transformer: decimalToNumber  })
   balanceAfter: number;
 
   @Column({ nullable: true })

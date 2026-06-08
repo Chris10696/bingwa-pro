@@ -1,8 +1,12 @@
 // bingwa-pro-backend/src/offers/entities/offer.entity.ts
-// W2.A: Category relation dropped (D-W2-1), validityLabel dropped (D-W2-3),
-// ussdTemplate renamed to ussdCode (D-W2-F). Added OfferType enum + the 8
-// Hybrid retry/reschedule fields (Q-W2-1, data layer only — the OfferSettings
-// UI that edits them ships in W3). agentId retained (Q-W2-17 per-agent).
+// W3.H prep: autoRetry default flipped to TRUE to match the Hybrid Offer
+// Settings screenshot (locked B4-part-2). Single-column-default change;
+// `synchronize:true` updates the column DEFAULT in DDL but does NOT rewrite
+// existing rows, so this is safe additive behavior — new offers get
+// autoRetry=true; existing offers keep whatever they were saved with.
+//
+// All other fields unchanged from W2.A. The 7 retry/reschedule fields are
+// still data-layer-only at this commit; W3.H's UI ships next.
 import {
   Entity,
   Column,
@@ -11,7 +15,6 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm';
-
 // Hybrid's offer category, modeled as an enum on the offer rather than a
 // separate Category table (D-W2-1). Client display labels:
 //   NONE → "All", DATA → "Data", VOICE → "Minutes", SMS → "SMS".
@@ -21,7 +24,6 @@ export enum OfferType {
   DATA = 'DATA',
   SMS = 'SMS',
 }
-
 @Entity('offers')
 export class Offer {
   @PrimaryGeneratedColumn('uuid')
@@ -52,15 +54,17 @@ export class Offer {
   agentId: string;
 
   // ===== Hybrid retry/reschedule config (Q-W2-1) =====
-  // Data layer only in W2; defaults match a freshly-created Hybrid offer.
-  // The simple Create Offer form does not set these — W3's OfferSettings does.
+  // Data layer only in W2; W3.H's OfferSettings UI edits these.
+  // Defaults match a freshly-created Hybrid offer (per screenshot).
   @Column({ default: false })
   autoReschedule: boolean;
 
   @Column({ type: 'varchar', nullable: true })
   autoRescheduleRunTime: string | null;
 
-  @Column({ default: false })
+  // W3 lock: default flipped FALSE → TRUE to match Hybrid Offer Settings
+  // screenshot (Auto Retry shown ON for a fresh offer).
+  @Column({ default: true })
   autoRetry: boolean;
 
   @Column({ default: false })

@@ -1,19 +1,35 @@
 // lib/features/quick_dial/presentation/providers/quick_dial_provider.dart
-// W2.4C Quick Dial. Mirrors Hybrid's QuickDialViewModel.dial() order:
-//   1. normalize customer phone (normalizeKenyanPhone — matches Hybrid's
-//      takeLast(9)+"0").
-//   2. POST /transactions via createQuickDial (the 402-guard gate). dio
-//      validateStatus<500 → 402/400/404 resolve, not throw → inspect statusCode.
-//   3. ONLY on 2xx: substitute BH via UssdTemplateFormatter, then Express-dial
-//      through the existing UssdService (bingwa_pro/ussd → ACTION_CALL).
-// Advanced/accessibility routing + live status streaming are W3. W2 is
-// Express-only (matches Hybrid's behavior when accessibility is unavailable).
+//
+// W3.L — Quick Dial routed through the REAL pipeline (Hybrid parity).
+//
+// Before (W2.4C stopgap): createQuickDial (born SUCCESS) → fire-and-forget
+// Express dial via UssdService.executeUssd. No response capture, no retry, no
+// auto-reply, no status. The W2 primer flagged this as a deliberate stopgap.
+//
+// After (W3.L): mirrors Hybrid's QuickDialViewModel.dial, which runs Quick Dial
+// through the same DialUssdUseCase → pipeline as every other dial:
+//   1. Validate (offer selected; phone normalized) — verbatim Hybrid messages.
+//   2. createQuickDial → backend now creates a SCHEDULED txn + debits at
+//      dial-time (D-W3-17), returning the txn (id, ussdCode, customerPhone,
+//      offerId, amount, offerName).
+//   3. Enqueue that txn into the native pipeline (UssdExecutionService) via
+//      SessionBridge.enqueueQuickDial — Express/Advanced per mode, internal
+//      retry, classify, auto-reply, status PATCH, all shared with SMS/scheduled.
+//   4. Observe the outcome by polling GET /transactions/:id/status (Pro's
+//      stand-in for Hybrid's observeTransactionStatusUseCase) until terminal,
+//      then surface (success, responseText) to the UssdResponseDialog.
+//
+// The old UssdService dependency is GONE — Quick Dial no longer dials directly;
+// the pipeline owns the dial. Auto-reply fires for QD too (Hybrid doesn't skip
+// QUICK_DIAL), so a successful manual dial also texts the customer.
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/services/session_bridge_service.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../core/utils/ussd_template_formatter.dart';
 import '../../../../shared/models/offer_model.dart';
+import '../../../../shared/models/transaction_model.dart';
 import '../../../../shared/repositories/transaction_repository.dart';
-import '../../../ussd/services/ussd_service.dart';
 
 enum QuickDialPhase { idle, recording, dialing, success, error }
 
@@ -23,18 +39,22 @@ class QuickDialState {
   final QuickDialPhase phase;
   final String? errorMessage;
   final bool needsSubscription; // true when backend returned 402
-
+  // W3.L: terminal pipeline result for the UssdResponseDialog.
+  final bool dialedSuccess;
+  final String? ussdResponse;
+  final bool showResultDialog;
   const QuickDialState({
     this.selectedOffer,
     this.customerPhone = '',
     this.phase = QuickDialPhase.idle,
     this.errorMessage,
     this.needsSubscription = false,
+    this.dialedSuccess = false,
+    this.ussdResponse,
+    this.showResultDialog = false,
   });
-
   bool get isBusy =>
       phase == QuickDialPhase.recording || phase == QuickDialPhase.dialing;
-
   QuickDialState copyWith({
     Offer? selectedOffer,
     bool clearOffer = false,
@@ -43,6 +63,10 @@ class QuickDialState {
     String? errorMessage,
     bool clearError = false,
     bool? needsSubscription,
+    bool? dialedSuccess,
+    String? ussdResponse,
+    bool clearResponse = false,
+    bool? showResultDialog,
   }) {
     return QuickDialState(
       selectedOffer: clearOffer ? null : (selectedOffer ?? this.selectedOffer),
@@ -50,16 +74,33 @@ class QuickDialState {
       phase: phase ?? this.phase,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       needsSubscription: needsSubscription ?? this.needsSubscription,
+      dialedSuccess: dialedSuccess ?? this.dialedSuccess,
+      ussdResponse: clearResponse ? null : (ussdResponse ?? this.ussdResponse),
+      showResultDialog: showResultDialog ?? this.showResultDialog,
     );
   }
 }
 
 class QuickDialNotifier extends StateNotifier<QuickDialState> {
   final TransactionRepository _transactionRepository;
-  final UssdService _ussdService;
-
-  QuickDialNotifier(this._transactionRepository, this._ussdService)
+  final SessionBridgeService _sessionBridge;
+  QuickDialNotifier(this._transactionRepository, this._sessionBridge)
       : super(const QuickDialState());
+
+  // Status-poll cadence + cap (Pro's stand-in for observeTransactionStatusUseCase).
+  // The pipeline does an internal retry + up to the offer's external retries, so
+  // we poll generously: 2s × 60 = up to ~2 min before giving up the *observation*
+  // (the dial/debit already happened server-side regardless).
+  static const Duration _pollInterval = Duration(seconds: 2);
+  static const int _maxPolls = 60;
+
+  static const Set<TransactionStatus> _terminal = {
+    TransactionStatus.success,
+    TransactionStatus.failed,
+    TransactionStatus.failedAlreadyRecommended,
+    TransactionStatus.failedOfferDeactivated,
+    TransactionStatus.blocked,
+  };
 
   void selectOffer(Offer offer) {
     state = state.copyWith(
@@ -82,11 +123,20 @@ class QuickDialNotifier extends StateNotifier<QuickDialState> {
     );
   }
 
-  /// The dial sequence. Backend-first; dials only on confirmed entitlement.
+  /// Dismiss the result dialog (and clear the captured response).
+  void dismissResultDialog() {
+    state = state.copyWith(
+      showResultDialog: false,
+      clearResponse: true,
+      dialedSuccess: false,
+    );
+  }
+
+  /// The dial sequence. Backend-first; routes through the real pipeline.
   Future<void> dial() async {
     if (state.isBusy) return;
-
     final offer = state.selectedOffer;
+    // Validation messages verbatim from Hybrid QuickDialViewModel.dial.
     if (offer == null) {
       state = state.copyWith(
         phase: QuickDialPhase.error,
@@ -94,8 +144,6 @@ class QuickDialNotifier extends StateNotifier<QuickDialState> {
       );
       return;
     }
-
-    // 1. Normalize phone (Hybrid parity). Reject too-short input early.
     final String normalizedPhone;
     try {
       normalizedPhone = normalizeKenyanPhone(state.customerPhone);
@@ -106,21 +154,19 @@ class QuickDialNotifier extends StateNotifier<QuickDialState> {
       );
       return;
     }
-
-    // 2. Backend record + 402-guard.
+    // 1. Backend record + 402-guard (now creates SCHEDULED + debits at dial-time).
     state = state.copyWith(
       phase: QuickDialPhase.recording,
       clearError: true,
       needsSubscription: false,
+      clearResponse: true,
     );
-
     try {
       final response = await _transactionRepository.createQuickDial(
         offerId: offer.id,
         customerPhone: normalizedPhone,
       );
       final sc = response.statusCode ?? 0;
-
       if (sc == 402) {
         state = state.copyWith(
           phase: QuickDialPhase.error,
@@ -143,31 +189,51 @@ class QuickDialNotifier extends StateNotifier<QuickDialState> {
         return;
       }
 
-      // 3. Backend confirmed → substitute BH → Express-dial.
-      final ussdCode = UssdTemplateFormatter.format(
-        offer.ussdCode,
-        phone: normalizedPhone,
-      );
-      AppLogger.d('Quick Dial: dialing $ussdCode for $normalizedPhone');
+      // 2. Extract the SCHEDULED txn fields the pipeline needs.
+      final data = response.data;
+      if (data is! Map) {
+        state = state.copyWith(
+          phase: QuickDialPhase.error,
+          errorMessage: 'Unexpected server response',
+        );
+        return;
+      }
+      final txnId = (data['id'] ?? '').toString();
+      final ussdCode = (data['ussdCode'] ?? '').toString();
+      if (txnId.isEmpty || ussdCode.isEmpty) {
+        state = state.copyWith(
+          phase: QuickDialPhase.error,
+          errorMessage: 'Server did not return a dialable transaction',
+        );
+        return;
+      }
+      final int? amount = _asInt(data['amount']);
 
+      // 3. Enqueue into the real pipeline (Express/Advanced per mode, retry,
+      //    classify, auto-reply, status). The native side reads token/baseUrl.
       state = state.copyWith(phase: QuickDialPhase.dialing);
-
-      final dialed = await _ussdService.executeUssd(
+      AppLogger.d('Quick Dial: enqueueing txn=$txnId into pipeline');
+      final enqueued = await _sessionBridge.enqueueQuickDial(
+        transactionId: txnId,
         ussdCode: ussdCode,
-        phoneNumber: normalizedPhone,
+        customerPhone: normalizedPhone,
+        offerId: offer.id,
+        offerName: offer.name,
+        amount: amount,
+        offerPrice: offer.price,
       );
-
-      if (dialed) {
-        state = state.copyWith(phase: QuickDialPhase.success);
-      } else {
-        // Backend already recorded; dial intent failed (permission/dialer).
+      if (!enqueued) {
         state = state.copyWith(
           phase: QuickDialPhase.error,
           errorMessage:
               'Transaction recorded, but the dial could not start. '
               'Check that call permission is granted, then retry.',
         );
+        return;
       }
+
+      // 4. Observe the outcome (poll /:id/status until terminal) → result dialog.
+      await _observeStatus(txnId);
     } catch (e) {
       state = state.copyWith(
         phase: QuickDialPhase.error,
@@ -175,11 +241,66 @@ class QuickDialNotifier extends StateNotifier<QuickDialState> {
       );
     }
   }
+
+  /// Poll the transaction status until terminal (or cap), then surface the
+  /// result to the UssdResponseDialog. Mirrors observeTransactionStatusUseCase.
+  Future<void> _observeStatus(String transactionId) async {
+    for (var i = 0; i < _maxPolls; i++) {
+      await Future.delayed(_pollInterval);
+      TransactionResponse status;
+      try {
+        status = await _transactionRepository.getTransactionStatus(transactionId);
+      } catch (e) {
+        // Transient read error — keep polling; the pipeline is still running.
+        AppLogger.d('Quick Dial status poll error (continuing): $e');
+        continue;
+      }
+      if (!_terminal.contains(status.status)) continue;
+
+      final success = status.status == TransactionStatus.success;
+      final responseText = (status.ussdResponse != null &&
+              status.ussdResponse!.trim().isNotEmpty)
+          ? status.ussdResponse!
+          : (status.errorMessage ??
+              (success ? 'Request successful' : 'Request failed'));
+      state = state.copyWith(
+        phase: success ? QuickDialPhase.success : QuickDialPhase.error,
+        dialedSuccess: success,
+        ussdResponse: responseText,
+        showResultDialog: true,
+        clearError: true,
+      );
+      if (success) {
+        // Hybrid clears phone + offer on success.
+        state = state.copyWith(customerPhone: '', clearOffer: true);
+      }
+      return;
+    }
+    // Cap reached without a terminal status — the dial/debit already happened;
+    // we just couldn't observe the final result in time.
+    state = state.copyWith(
+      phase: QuickDialPhase.success,
+      dialedSuccess: true,
+      ussdResponse:
+          'Dial sent. The result is taking longer than usual — check '
+          'Transaction History for the final status.',
+      showResultDialog: true,
+      clearError: true,
+    );
+  }
+
+  int? _asInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is double) return v.toInt();
+    if (v is String) return double.tryParse(v)?.toInt();
+    return null;
+  }
 }
 
 final quickDialNotifierProvider =
     StateNotifierProvider<QuickDialNotifier, QuickDialState>((ref) {
   final transactionRepository = ref.watch(transactionRepositoryProvider);
-  final ussdService = ref.watch(ussdServiceProvider);
-  return QuickDialNotifier(transactionRepository, ussdService);
+  final sessionBridge = ref.watch(sessionBridgeServiceProvider);
+  return QuickDialNotifier(transactionRepository, sessionBridge);
 });

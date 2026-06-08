@@ -8,7 +8,9 @@ import '../../../../core/utils/validators.dart';
 import '../../../../core/security/secure_storage_manager.dart';
 import '../../../../core/security/device_fingerprint.dart';
 import '../../../../core/auth/auth_state_provider.dart';
-
+// W3.E / D-W3-19 (Option B): native session bridge for the background worker.
+import '../../../../core/constants/api_constants.dart';
+import '../../../../core/services/session_bridge_service.dart';
 // Form Models
 class PhoneNumber extends FormzInput<String, String> {
   const PhoneNumber.pure() : super.pure('');
@@ -19,7 +21,6 @@ class PhoneNumber extends FormzInput<String, String> {
     return Validators.isValidSafaricomNumber(value);
   }
 }
-
 class Pin extends FormzInput<String, String> {
   const Pin.pure() : super.pure('');
   const Pin.dirty([super.value = '']) : super.dirty(); // FIX: super parameter
@@ -29,7 +30,6 @@ class Pin extends FormzInput<String, String> {
     return Validators.isValidPin(value);
   }
 }
-
 class FullName extends FormzInput<String, String> {
   const FullName.pure() : super.pure('');
   const FullName.dirty([super.value = '']) : super.dirty(); // FIX: super parameter
@@ -39,7 +39,6 @@ class FullName extends FormzInput<String, String> {
     return Validators.isValidFullName(value);
   }
 }
-
 class Email extends FormzInput<String, String> {
   const Email.pure() : super.pure('');
   const Email.dirty([super.value = '']) : super.dirty(); // FIX: super parameter
@@ -49,7 +48,6 @@ class Email extends FormzInput<String, String> {
     return Validators.isValidEmail(value);
   }
 }
-
 class NationalId extends FormzInput<String, String> {
   const NationalId.pure() : super.pure('');
   const NationalId.dirty([super.value = '']) : super.dirty(); // FIX: super parameter
@@ -77,7 +75,6 @@ class ConfirmPin extends FormzInput<String, String> {
     return null;
   }
 }
-
 // Auth State
 class AuthState {
   final PhoneNumber phoneNumber;
@@ -153,7 +150,40 @@ class AuthNotifier extends StateNotifier<AuthState> {
   final Ref _ref; // ADD THIS for accessing other providers
   
   AuthNotifier(this._authRepository, this._ref) : super(AuthState());
-  
+
+  // W3.E / D-W3-19 (Option B): mirror the current session into the native store
+  // so the background ScheduleTransactionWorker can authenticate. The worker runs
+  // with no Flutter engine and cannot read flutter_secure_storage, so Dart mirrors
+  // {accessToken, baseUrl, agentId} natively and the worker reads the current token
+  // each time it fires. Reads from SecureStorageManager — the single source of truth
+  // that auth_repository keeps current on BOTH login and refresh — so the value
+  // pushed here is never stale. Non-fatal by design: a mirror failure must never
+  // break the auth flow (SessionBridgeService also swallows its own errors).
+  //
+  // KNOWN COVERAGE GAP (flagged): a silent token refresh inside the Dio
+  // 401-interceptor (repository level) does NOT pass through this notifier, so the
+  // native mirror can lag until the next notifier-level auth event. Robust fix is to
+  // mirror beside saveAuthToken inside auth_repository.refreshToken(); W3.J's 24/7
+  // heartbeat (which drives periodic notifier-level refreshes) also closes it. Until
+  // then the worker degrades gracefully: stale token -> 401 -> pre-dial retry ->
+  // fires once the token is refreshed and re-mirrored.
+  Future<void> _mirrorSessionToNative() async {
+    try {
+      final token = await SecureStorageManager.getAuthToken();
+      final agentId = await SecureStorageManager.getAgentId();
+      if (token == null || token.isEmpty || agentId == null || agentId.isEmpty) {
+        return;
+      }
+      await _ref.read(sessionBridgeServiceProvider).setSession(
+            accessToken: token,
+            baseUrl: ApiConstants.baseUrl,
+            agentId: agentId,
+          );
+    } catch (e) {
+      AppLogger.w('Session mirror to native failed (non-fatal)', e);
+    }
+  }
+
   // Login Methods
   void updatePhoneNumber(String value) {
     state = state.copyWith(
@@ -221,13 +251,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
       if (await SecureStorageManager.getDeviceId() == null) {
         await SecureStorageManager.saveDeviceId(deviceId);
       }
-      
+
       // Save session data
       await SecureStorageManager.saveAuthToken(response.accessToken);
       await SecureStorageManager.saveRefreshToken(response.refreshToken);
       await SecureStorageManager.saveSessionExpiry(response.expiresAt);
       await SecureStorageManager.saveAgentId(response.agent.id);
-      
+
+      // W3.E: mirror the freshly-saved session to native for the background worker.
+      await _mirrorSessionToNative();
+
       state = state.copyWith(
         status: FormzSubmissionStatus.success,
         agent: response.agent,
@@ -236,7 +269,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
         requiresBiometricSetup: response.requiresBiometricSetup,
         errorMessage: null,
       );
-
       _ref.read(authStateProvider.notifier).markAuthenticated();
     } catch (e) {
       String errorMsg = e.toString();
@@ -305,7 +337,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       isRegistering: true,
       errorMessage: null,
     );
-    
+
     try {
       // Generate device ID
       final deviceId = await DeviceFingerprint.generateDeviceId();
@@ -373,7 +405,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
     }
   }
-  
+
   // PIN Reset Methods
   Future<void> resetPin({
     required String otp,
@@ -436,7 +468,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
       
       // Clear all local storage
       await SecureStorageManager.clearAll();
-      
+
+      // W3.E: clear the native session mirror so a stale token can't be used by
+      // the background worker after logout.
+      await _ref.read(sessionBridgeServiceProvider).clear();
+
       // Reset state
       state = AuthState();
       _ref.read(authStateProvider.notifier).markUnauthenticated();
@@ -446,12 +482,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
       AppLogger.e('Logout error:', e);
       // Even if API fails, clear local state
       await SecureStorageManager.clearAll();
+      // W3.E: clear native mirror on the failure path too.
+      await _ref.read(sessionBridgeServiceProvider).clear();
       state = AuthState();
     } finally {
       state = state.copyWith(isLoading: false);
     }
   }
-  
+
   Future<void> checkAuthentication() async {
     state = state.copyWith(isLoading: true);
     
@@ -466,6 +504,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
           isAuthenticated: true,
           isLoading: false,
         );
+
+        // W3.E: re-mirror on app-restart / session check (checkSessionValidity may
+        // have refreshed the token), so the worker always has the current token.
+        await _mirrorSessionToNative();
       } else {
         state = state.copyWith(
           isAuthenticated: false,
@@ -492,7 +534,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
     
     try {
       final response = await _authRepository.refreshToken();
-      
+
+      // W3.E: the repo persisted the new token to SecureStorageManager; mirror it
+      // to native so the background worker keeps a valid token.
+      await _mirrorSessionToNative();
+
       state = state.copyWith(
         status: FormzSubmissionStatus.success,
         agent: response.agent,
@@ -500,7 +546,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
         isLoading: false,
         requiresBiometricSetup: response.requiresBiometricSetup,
       );
-
       _ref.read(authStateProvider.notifier).markAuthenticated();
     } catch (e) {
       state = state.copyWith(
@@ -509,11 +554,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
         isLoading: false,
         isAuthenticated: false,
       );
-
       _ref.read(authStateProvider.notifier).markUnauthenticated();
     }
   }
-  
+
   // Biometric Setup
   Future<void> setupBiometric(String publicKey) async {
     if (state.agent == null) return;
@@ -557,21 +601,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
     );
   }
 }
-
 // Providers
 final authNotifierProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   final authRepository = ref.watch(authRepositoryProvider);
   return AuthNotifier(authRepository, ref); // Pass ref to constructor
 });
-
 final isAuthenticatedProvider = Provider<bool>((ref) {
   return ref.watch(authNotifierProvider).isAuthenticated;
 });
-
 final currentAgentProvider = Provider<AgentProfile?>((ref) {
   return ref.watch(authNotifierProvider).agent;
 });
-
 final authLoadingProvider = Provider<bool>((ref) {
   return ref.watch(authNotifierProvider).isLoading;
 });

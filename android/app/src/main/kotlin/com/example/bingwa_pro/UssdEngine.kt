@@ -1,19 +1,17 @@
 // C:\bingwa_pro\android\app\src\main\kotlin\com\example\bingwa_pro\UssdEngine.kt
 package com.example.bingwa_pro
-
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.telecom.PhoneAccountHandle
+import android.telecom.TelecomManager
+import android.telephony.TelephonyManager
 import android.util.Log
 import kotlinx.coroutines.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
-
+import java.util.concurrent.atomic.AtomicBoolean
 // ─── dryRun parameter ────────────────────────────────────────────────────────
 // dryRun = true  → every executeXxxUssd() logs what it would dial but never
 //                  opens the dialler. Safe when airtime is zero.
@@ -30,153 +28,214 @@ class UssdEngine(
     private val TAG = "UssdEngine"
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // ── USSD route table ─────────────────────────────────────────────────────
-    // priceCents is the M-PESA payment amount × 100.
-    // e.g. KES 20.00 → priceCents = 2000
-    // The "@" placeholder in template is replaced by the customer phone number.
-    // ─────────────────────────────────────────────────────────────────────────
-    private val ussdRoutes = listOf(
-        // ── SMS Bundles ──────────────────────────────────────────────────────
-        UssdRoute("20sms_valid_24hrs",      "*188*10*1*1*@*1*2#",           500, "SMS",     "ADVANCED"),
-        UssdRoute("200sms_valid_24hrs",     "*188*10*1*2*@*1*2#",          1000, "SMS",     "ADVANCED"),
-        UssdRoute("1000sms_valid_7days",    "*188*10*2*2*@*1*2#",          3000, "SMS",     "ADVANCED"),
-
-        // ── DATA Bundles – EXPRESS ────────────────────────────────────────────
-        UssdRoute("1gb_1hr",               "*180*5*2*@*5*1#",              1900, "DATA",    "EXPRESS"),
-        UssdRoute("250mb_24hrs",           "*180*5*2*@*6*1#",              2000, "DATA",    "EXPRESS"),
-        UssdRoute("350mb_7days",           "*180*5*2*@*2*1#",              4700, "DATA",    "EXPRESS"),
-        UssdRoute("1_5gb_3hrs",            "*180*5*2*@*1*1#",              4900, "DATA",    "EXPRESS"),
-        UssdRoute("1_5gb_3hrs_v2",         "*180*5*2*@*1*1#",              5000, "DATA",    "EXPRESS"),
-        UssdRoute("1_25gb_midnight",       "*180*5*2*@*8*1#",              5500, "DATA",    "EXPRESS"),
-        UssdRoute("1gb_24hrs",             "*180*5*2*@*7*1#",              9900, "DATA",    "EXPRESS"),
-
-        // ── DATA Bundles – ADVANCED ───────────────────────────────────────────
-        UssdRoute("1gb_1hr_many",          "*544*98*13*3*2*@*1*1#",        2300, "DATA",    "ADVANCED"),
-        UssdRoute("1_5gb_3hrs_many",       "*544*98*13*3*3*@*1*1#",        5300, "DATA",    "ADVANCED"),
-        UssdRoute("2gb_24hrs_many",        "*544*98*13*3*1*@*1*1#",       11000, "DATA",    "ADVANCED"),
-
-        // ── MINUTES Bundles ───────────────────────────────────────────────────
-        UssdRoute("350_flex",              "*444*5*5*1*3*@*2*1#",          2100, "MINUTES", "ADVANCED"),
-        UssdRoute("350_flex_v2",           "*444*5*5*1*3*@*2*1#",          2200, "MINUTES", "ADVANCED"),
-        UssdRoute("350_flex_v3",           "*444*5*5*1*3*@*2*1#",          2400, "MINUTES", "ADVANCED"),
-        UssdRoute("350_flex_v4",           "*444*5*5*1*3*@*2*1#",          2500, "MINUTES", "ADVANCED"),
-        UssdRoute("350_flex_v5",           "*444*5*5*1*3*@*2*1#",          2600, "MINUTES", "ADVANCED"),
-        UssdRoute("50mins_midnight",       "*444*5*7*7*3*@*2*1*1#",        5100, "MINUTES", "ADVANCED"),
-        UssdRoute("50mins_v1",             "*444*5*7*7*3*@*2*1*1#",        5200, "MINUTES", "ADVANCED"),
-        UssdRoute("50mins_v3",             "*444*5*7*7*3*@*2*1*1#",        5400, "MINUTES", "ADVANCED"),
-    )
-
-    // ── Public API ───────────────────────────────────────────────────────────
-
-    fun findUssdRouteByPrice(priceCents: Int): UssdRoute? =
-        ussdRoutes.find { it.priceCents == priceCents }
-
-    fun buildUssdCode(route: UssdRoute, customerPhone: String): String {
-        var code = route.template.replace("@", customerPhone)
+    // ── W3.B: data-driven offer formatting (Hybrid FormatUssdUseCase parity) ──
+    // Scheduled/quick-dial offers store a template using the "BH" placeholder for
+    // the customer phone and "AMT" for the amount (Safaricom codes are digits/*/#
+    // only, so these letter tokens are unambiguous). This mirrors the Dart
+    // ussd_template_formatter so device-side dials (scheduled renewals) format the
+    // same way the in-app Quick Dial path already does.
+    fun normalizeKenyanPhone(raw: String): String {
+        val digits = raw.filter { it.isDigit() }
+        val last9 = if (digits.length >= 9) digits.takeLast(9) else digits
+        return "0$last9"
+    }
+    fun formatUssdCode(template: String, customerPhone: String, amount: Int? = null): String {
+        var code = template.replace("BH", normalizeKenyanPhone(customerPhone))
+        if (amount != null) code = code.replace("AMT", amount.toString())
         if (!code.endsWith("#")) code += "#"
         return code
     }
 
-    // ── Entry point called by MpesaMessageListener AND the test channel ──────
-    // Parses the SMS body → matches a route → builds the USSD code → executes
-    // (or dry-runs). This is the single authoritative pipeline for both paths.
-    suspend fun processPaymentSms(body: String) {
-        val info = parseMpesaMessage(body)
-        if (info == null) {
-            Log.w(TAG, "processPaymentSms: could not parse — raw body:\n$body")
-            return
+    // ── EXPRESS execution — W3.B: captures the response via sendUssdRequest ───
+    // Kept returning Boolean so existing callers (MainActivity.executeUssd) compile
+    // unchanged. Callers that need the response text
+    // (UssdExecutionService, AirtimeChecker) call dialExpressCapturing directly.
+    suspend fun executeExpressUssd(ussdCode: String, phoneNumber: String): Boolean =
+        dialExpressCapturing(ussdCode, phoneNumber).success
+
+    /**
+     * W3.B — the real Express dial. Uses TelephonyManager.sendUssdRequest (API 26+),
+     * which actually captures Safaricom's response text (D-W3-2). ACTION_CALL is kept
+     * ONLY as a labeled fallback for sub-26 devices and OEM/SIM combos where
+     * sendUssdRequest throws. The fallback cannot capture a response.
+     *
+     * MONEY-SAFETY: this fires the USSD session AT MOST ONCE. The ACTION_CALL fallback
+     * is only reached when sendUssdRequest did NOT start a session (threw) or on sub-26,
+     * so there is never a double-charge.
+     */
+    suspend fun dialExpressCapturing(
+        ussdCode: String,
+        phoneNumber: String,
+        timeoutMillis: Long = 40_000L
+    ): UssdDialResult {
+        val finalCode = if (ussdCode.endsWith("#")) ussdCode else "$ussdCode#"
+        if (dryRun) {
+            Log.d(TAG, "🧪 DRY RUN — would sendUssdRequest: $finalCode for $phoneNumber")
+            return UssdDialResult(success = true, response = "DRY_RUN")
         }
-
-        Log.d(TAG, "Payment parsed — Amount: ${info.amount} cents | Customer: ${info.customerPhone}")
-
-        val route = findUssdRouteByPrice(info.amount)
-        if (route == null) {
-            Log.w(
-                TAG, "No route matched ${info.amount} cents. " +
-                "Defined prices: ${ussdRoutes.map { it.priceCents }.distinct().sorted()}"
-            )
-            return
+        // sendUssdRequest is API 26+. Below that → labeled ACTION_CALL fallback.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            val fired = fireActionCallFallback(finalCode)
+            return UssdDialResult(success = fired, response = null)
         }
-
-        Log.d(TAG, "Matched route: ${route.name} | Delivery: ${route.delivery}")
-
-        val ussdCode = buildUssdCode(route, info.customerPhone)
-        Log.d(TAG, "Final USSD code: $ussdCode")
-
-        val success = if (route.delivery == "EXPRESS") {
-            executeExpressUssd(ussdCode, info.customerPhone)
+        val tmDefault = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+            ?: return UssdDialResult(fireActionCallFallback(finalCode), null)
+        // W3.F: pin to the configured dial SIM when resolvable; else use the default manager
+        // (single-SIM or unresolved slot → identical to pre-W3.F behavior, never hard-fails).
+        val dialSubId = SimSubscriptionResolver.dialSubId(context)
+        val tm = if (dialSubId != null) {
+            try {
+                tmDefault.createForSubscriptionId(dialSubId)
+            } catch (e: Exception) {
+                Log.w(TAG, "createForSubscriptionId($dialSubId) failed (${e.message}) — default TM")
+                tmDefault
+            }
         } else {
-            executeAdvancedUssd(ussdCode, info.customerPhone)
+            tmDefault
         }
-
-        if (success) {
-    Log.d(TAG, "✅ USSD delivered for ${info.customerPhone}")
-    // Part 5 Step B — record on backend to prevent Flow 2 re-processing
-    // Replace empty strings with values from SharedPreferences or passed context
-    recordPaymentOnBackend(
-        mpesaRef       = info.reference,
-        amount         = info.amount,
-        customerPhone  = info.customerPhone,
-        agentId        = "",   // TODO: read from SharedPreferences
-        authToken      = ""    // TODO: read from SecureStorage via MethodChannel
-    )
-} else {
-    Log.e(TAG, "❌ USSD failed for ${info.customerPhone}")
-}
+        return try {
+            val captured = withTimeoutOrNull(timeoutMillis) {
+                suspendCancellableCoroutine<UssdDialResult> { cont ->
+                    val resumed = AtomicBoolean(false)
+                    val callback = object : TelephonyManager.UssdResponseCallback() {
+                        override fun onReceiveUssdResponse(
+                            telephonyManager: TelephonyManager,
+                            request: String,
+                            response: CharSequence
+                        ) {
+                            if (resumed.compareAndSet(false, true)) {
+                                cont.resume(UssdDialResult(true, response.toString()), null)
+                            }
+                        }
+                        override fun onReceiveUssdResponseFailed(
+                            telephonyManager: TelephonyManager,
+                            request: String,
+                            failureCode: Int
+                        ) {
+                            if (resumed.compareAndSet(false, true)) {
+                                cont.resume(UssdDialResult(false, "USSD request failed (code=$failureCode)"), null)
+                            }
+                        }
+                    }
+                    try {
+                        tm.sendUssdRequest(finalCode, callback, Handler(Looper.getMainLooper()))
+                    } catch (e: Exception) {
+                        Log.w(TAG, "sendUssdRequest threw (${e.message}) — OEM fallback to ACTION_CALL")
+                        val fired = fireActionCallFallback(finalCode)
+                        if (resumed.compareAndSet(false, true)) {
+                            cont.resume(UssdDialResult(fired, null), null)
+                        }
+                    }
+                }
+            }
+            captured ?: run {
+                Log.w(TAG, "sendUssdRequest timed out after ${timeoutMillis}ms for $finalCode")
+                UssdDialResult(false, "Transaction timed out", isTimeout = true)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "dialExpressCapturing error: ${e.message}", e)
+            UssdDialResult(false, e.message)
+        }
     }
 
-    // ── EXPRESS execution (direct Intent dial) ────────────────────────────────
-    suspend fun executeExpressUssd(ussdCode: String, phoneNumber: String): Boolean =
-        withContext(Dispatchers.IO) {
-            try {
-                val finalCode   = if (ussdCode.endsWith("#")) ussdCode else "$ussdCode#"
-                val encodedCode = finalCode.replace("#", Uri.encode("#"))
-
-                if (dryRun) {
-                    Log.d(TAG, "🧪 DRY RUN — EXPRESS would dial: $finalCode for $phoneNumber")
-                    Log.d(TAG, "🧪 Remove dryRun=true to execute for real.")
-                    return@withContext true
+    // Labeled OEM/sub-26 fallback. Fire-and-forget; no response capture.
+    private fun fireActionCallFallback(finalCode: String): Boolean {
+        return try {
+            val encodedCode = finalCode.replace("#", Uri.encode("#"))
+            val intent = Intent(Intent.ACTION_CALL).apply {
+                data = Uri.parse("tel:$encodedCode")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                // W3.F: pin to the configured dial SIM when resolvable (else platform default).
+                SimSubscriptionResolver.dialPhoneAccountHandle(context)?.let {
+                    putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it)
                 }
-
-                val intent = Intent(Intent.ACTION_CALL).apply {
-                    data  = Uri.parse("tel:$encodedCode")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                withContext(Dispatchers.Main) { context.startActivity(intent) }
-                Log.d(TAG, "EXPRESS USSD executed: $finalCode")
-                true
-            } catch (e: Exception) {
-                Log.e(TAG, "EXPRESS USSD failed: ${e.message}", e)
-                false
             }
+            context.startActivity(intent)
+            Log.d(TAG, "EXPRESS fallback (ACTION_CALL) fired: $finalCode")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "ACTION_CALL fallback failed: ${e.message}", e)
+            false
         }
+    }
 
-    // ── ADVANCED execution (accessibility-service menu navigation) ────────────
+    // ── ADVANCED execution — W3.C: engine-driven multi-step navigation + capture ──
+    // Thin Boolean wrapper kept so existing callers (MainActivity.executeAdvancedUssd)
+    // compile unchanged. Callers that need the response text call
+    // dialAdvancedCapturing directly (UssdExecutionService).
     suspend fun executeAdvancedUssd(ussdCode: String, phoneNumber: String): Boolean =
-        withContext(Dispatchers.IO) {
-            try {
-                val finalCode   = if (ussdCode.endsWith("#")) ussdCode else "$ussdCode#"
-                val encodedCode = finalCode.replace("#", Uri.encode("#"))
+        dialAdvancedCapturing(ussdCode, phoneNumber).success
 
-                if (dryRun) {
-                    Log.d(TAG, "🧪 DRY RUN — ADVANCED would dial: $finalCode for $phoneNumber")
-                    Log.d(TAG, "🧪 Remove dryRun=true to execute for real.")
-                    return@withContext true
-                }
-
-                val intent = Intent(Intent.ACTION_CALL).apply {
-                    data  = Uri.parse("tel:$encodedCode")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                withContext(Dispatchers.Main) { context.startActivity(intent) }
-                Log.d(TAG, "ADVANCED USSD initiated: $finalCode")
-                true
-            } catch (e: Exception) {
-                Log.e(TAG, "ADVANCED USSD failed: ${e.message}", e)
-                false
-            }
+    /**
+     * W3.C — the real Advanced dial (Hybrid multiStepUssd + handleAdvancedMode parity).
+     *
+     * Unlike Express (a single sendUssdRequest), Advanced navigates the Safaricom USSD menu
+     * tree through the dialer UI driven by UssdAccessibilityService:
+     *   1. extractSteps splits the (already BH/AMT-formatted) code into [*BASE#, reply, reply…].
+     *   2. The reply steps go into UssdStepsRepository; the session is reset.
+     *   3. *BASE# is dialled via ACTION_CALL (optionally pinned to a SIM via PhoneAccountHandle,
+     *      which stays null until W3.F wires dual-SIM).
+     *   4. We await UssdSessionManager, which the accessibility service completes once it has
+     *      typed every step and read the final dialog.
+     * Success(text) → (success=true, text); Failure(text) → (false, text); timeout → isTimeout.
+     *
+     * MONEY-SAFETY: like Express, this opens the USSD session AT MOST ONCE (a single ACTION_CALL).
+     * No retry happens here; the pipeline owns retries and only re-dials on a FAILED outcome.
+     */
+    suspend fun dialAdvancedCapturing(
+        ussdCode: String,
+        phoneNumber: String,
+        phoneAccountHandle: PhoneAccountHandle? = null,
+        timeoutMillis: Long = 60_000L
+    ): UssdDialResult {
+        if (dryRun) {
+            Log.d(TAG, "🧪 DRY RUN — ADVANCED would navigate: $ussdCode for $phoneNumber")
+            return UssdDialResult(success = true, response = "DRY_RUN")
         }
+        return try {
+            val steps = UssdUtils.extractSteps(ussdCode)
+            if (steps.isEmpty()) {
+                return UssdDialResult(false, "USSD code is missing")
+            }
+            // W3.F: pin to the configured dial SIM. Use the explicit param if given, else resolve
+            // from settings (null when single-SIM/unresolved → platform default, pre-W3.F behavior).
+            val handle = phoneAccountHandle ?: SimSubscriptionResolver.dialPhoneAccountHandle(context)
+            // Queue the menu-reply steps (everything after the dialled base) and arm the session.
+            UssdStepsRepository.addSteps(steps.drop(1))
+            val first = UssdUtils.formatFirstStep(steps.first())
+            UssdSessionManager.resetSession()
 
+            val encoded = Uri.encode(first)
+            val intent = Intent(Intent.ACTION_CALL).apply {
+                data = Uri.parse("tel:$encoded")
+                handle?.let { putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it) }
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            withContext(Dispatchers.Main) { context.startActivity(intent) }
+            Log.d(TAG, "ADVANCED dial started: $first (${steps.size - 1} step(s) queued)")
+
+            val state = withTimeoutOrNull(timeoutMillis) {
+                UssdSessionManager.waitForCompletion().await()
+            }
+            // Recycle session/steps for next time (Hybrid clears + resets after the await).
+            UssdStepsRepository.clearSteps()
+            UssdSessionManager.resetSession()
+
+            when (state) {
+                is UssdSessionState.Success -> UssdDialResult(true, state.response)
+                is UssdSessionState.Failure -> UssdDialResult(false, state.reason)
+                else -> {
+                    Log.w(TAG, "ADVANCED dial timed out after ${timeoutMillis}ms for $first")
+                    UssdDialResult(false, "Transaction timed out", isTimeout = true)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "dialAdvancedCapturing error: ${e.message}", e)
+            UssdStepsRepository.clearSteps()
+            UssdSessionManager.resetSession()
+            UssdDialResult(false, e.message)
+        }
+    }
     fun cancelCurrentUssd() {
         val intent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
@@ -184,98 +243,13 @@ class UssdEngine(
         }
         context.startActivity(intent)
     }
-
-    // ── SMS parser ────────────────────────────────────────────────────────────
-    // Mirrors the patterns in MpesaMessageListener so both production and test
-    // paths exercise identical parsing logic.
-
-    private val confirmationPattern = Regex(
-        """Confirmed\.\s+KES\s*([\d,]+\.?\d*)\s+received\s+from\s+[\w\s]+\s+(07\d{8}|2547\d{8}|01\d{8}|2541\d{8})""",
-        RegexOption.IGNORE_CASE
-    )
-    private val fallbackPattern = Regex(
-        """KES\s*([\d,]+\.?\d*)\s+(?:received\s+from|paid\s+by)\s+[\w\s]*?(07\d{8}|2547\d{8}|01\d{8}|2541\d{8})""",
-        RegexOption.IGNORE_CASE
-    )
-
-    private fun parseMpesaMessage(body: String): MpesaPaymentInfo? {
-        val match = confirmationPattern.find(body) ?: fallbackPattern.find(body)
-        if (match == null) {
-            Log.w(TAG, "parseMpesaMessage: no regex match")
-            return null
-        }
-
-        val amountStr = match.groupValues[1].replace(",", "")
-        val rawPhone  = match.groupValues[2]
-        val amount    = amountStr.toDoubleOrNull() ?: run {
-            Log.w(TAG, "parseMpesaMessage: bad amount string '$amountStr'")
-            return null
-        }
-
-        val normalizedPhone = normalizePhone(rawPhone)
-        val refMatch        = Regex("""^([A-Z0-9]{10})""").find(body.trim())
-        val reference       = refMatch?.groupValues?.get(1) ?: "N/A"
-
-        return MpesaPaymentInfo(
-            amount        = (amount * 100).toInt(),
-            customerPhone = normalizedPhone,
-            reference     = reference,
-            rawMessage    = body
-        )
-    }
-
-    private fun normalizePhone(phone: String): String = when {
-        phone.startsWith("2547") -> "0" + phone.substring(3)
-        phone.startsWith("2541") -> "0" + phone.substring(3)
-        else -> phone
-    }
-
-        // Call this AFTER successful USSD execution to prevent Flow 2 re-processing
-    private suspend fun recordPaymentOnBackend(
-        mpesaRef: String,
-        amount: Int,
-        customerPhone: String,
-        agentId: String,
-        authToken: String
-    ) = withContext(Dispatchers.IO) {
-        if (dryRun) {
-            Log.d(TAG, "🧪 DRY RUN — skipping backend recording")
-            return@withContext
-        }
-        try {
-            val json = JSONObject().apply {
-                put("mpesaTransactionId", mpesaRef)
-                put("amount", amount / 100.0)
-                put("customerPhone", customerPhone)
-                put("agentId", agentId)
-            }.toString()
-
-            val client = OkHttpClient()
-            val request = Request.Builder()
-                .url("${BuildConfig.API_BASE_URL}/transactions/record-sms-payment")
-                .addHeader("Authorization", "Bearer $authToken")
-                .post(json.toRequestBody("application/json".toMediaType()))
-                .build()
-
-            val response = client.newCall(request).execute()
-            when (response.code) {
-                201 -> Log.d(TAG, "✅ Payment recorded on backend: $mpesaRef")
-                409 -> Log.w(TAG, "⚠️ Duplicate payment — already recorded: $mpesaRef")
-                else -> Log.e(TAG, "Backend record failed: ${response.code}")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "recordPaymentOnBackend error: ${e.message}", e)
-            // Non-fatal — USSD already fired; don't crash the engine
-        }
-    }
 }
-
-// ── Data classes ──────────────────────────────────────────────────────────────
-
-data class UssdRoute(
-    val name:       String,
-    val template:   String,
-    val priceCents: Int,
-    val category:   String,
-    val delivery:   String
+// ── Data classes ───────────────────────────────────────────────────────────
+// W3.B — result of a capturing Express dial.
+// W3.A — isTimeout distinguishes a withTimeoutOrNull miss (no callback fired in time →
+// route to TimeoutChain) from a genuine onReceiveUssdResponseFailed callback (→ FAILED branch).
+data class UssdDialResult(
+    val success: Boolean,
+    val response: String?,
+    val isTimeout: Boolean = false
 )

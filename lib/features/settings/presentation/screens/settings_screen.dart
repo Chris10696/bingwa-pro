@@ -7,39 +7,40 @@ import 'package:go_router/go_router.dart';
 import 'package:line_icons/line_icons.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
 import '../../../../core/security/secure_storage_manager.dart';
+import '../../../../core/services/session_bridge_service.dart';
 import '../../../wallet/presentation/providers/wallet_provider.dart';
 import '../../../../shared/models/wallet_model.dart' show ProcessingMode;
-
+import 'accessibility_required_screen.dart';
+import 'sim_setup_screen.dart';
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
-
   @override
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
-
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _biometricEnabled = false;
   bool _notificationsEnabled = true;
   bool _transactionSounds = true;
   String _language = 'English';
-
   @override
   void initState() {
     super.initState();
     _loadSettings();
   }
-
   Future<void> _loadSettings() async {
     final biometricEnabled = await SecureStorageManager.getBiometricEnabled(false);
-    
-    setState(() {
-      _biometricEnabled = biometricEnabled;
-    });
 
+    if (mounted) {
+      setState(() {
+        _biometricEnabled = biometricEnabled;
+      });
+    }
     // W2.4D: ensure wallet balance is loaded so Processing Mode reflects state.
-    ref.read(walletNotifierProvider.notifier).loadWalletData();
+    // W3.I: await the load, then reconcile Advanced against the accessibility
+    // service (revert to Express if the service is off).
+    await ref.read(walletNotifierProvider.notifier).loadWalletData();
+    await _reconcileAccessibilityMode();
   }
-
   void _comingSoon(String feature) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$feature is coming in a later update')),
@@ -63,30 +64,87 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         contentPadding: const EdgeInsets.symmetric(horizontal: 8),
         activeColor: const Color(0xFF00C853),
         title: const Text('Advanced'),
-        subtitle: const Text('Menu navigation (requires accessibility — coming in a later update)'),
+        subtitle: const Text('Menu navigation (requires Accessibility service)'),
         value: ProcessingMode.advanced,
         groupValue: current,
         onChanged: (v) => _setProcessingMode(v),
       ),
     ]);
   }
-
   Future<void> _setProcessingMode(ProcessingMode? mode) async {
     if (mode == null) return;
-    await ref.read(walletNotifierProvider.notifier).setProcessingMode(mode);
+    final notifier = ref.read(walletNotifierProvider.notifier);
+
+    if (mode == ProcessingMode.advanced) {
+      // Faithful to Hybrid: selecting Advanced commits immediately (the optimistic
+      // setter flips the radio + mirrors to native), THEN we gate on the
+      // accessibility service. If it's off, open the instructions screen; on
+      // return we reconcile (revert to Express if it's still not enabled).
+      await notifier.setProcessingMode(ProcessingMode.advanced);
+      final enabled =
+          await ref.read(sessionBridgeServiceProvider).isAccessibilityEnabled();
+      if (!mounted) return;
+      if (enabled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Advanced mode enabled'),
+            backgroundColor: Color(0xFF00C853),
+          ),
+        );
+      } else {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const AccessibilityRequiredScreen(),
+          ),
+        );
+        // Back from the instructions screen — reconcile: keep Advanced only if
+        // the service is now enabled, otherwise revert to Express.
+        await _reconcileAccessibilityMode();
+      }
+      return;
+    }
+
+    // Express — straightforward.
+    await notifier.setProcessingMode(ProcessingMode.express);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Processing mode set to ${mode.name}'),
-        backgroundColor: const Color(0xFF00C853),
+      const SnackBar(
+        content: Text('Processing mode set to Express'),
+        backgroundColor: Color(0xFF00C853),
       ),
     );
   }
 
+  /// W3.I: if the wallet says Advanced but our accessibility service is not
+  /// enabled, revert to Express. Mirrors Hybrid's
+  /// postAccessibilityServiceStatus(false) → setProcessingMode(EXPRESS) safety
+  /// reconciliation, and prevents the Advanced dial path from firing without the
+  /// service (which would hang to timeout). Runs on screen load and whenever the
+  /// agent returns from the Accessibility settings screen.
+  Future<void> _reconcileAccessibilityMode() async {
+    if (!mounted) return;
+    final balance = ref.read(walletNotifierProvider).balance;
+    final current = balance?.wallet?.processingMode ?? ProcessingMode.express;
+    if (current != ProcessingMode.advanced) return;
+    final enabled =
+        await ref.read(sessionBridgeServiceProvider).isAccessibilityEnabled();
+    if (enabled) return;
+    await ref
+        .read(walletNotifierProvider.notifier)
+        .setProcessingMode(ProcessingMode.express);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Advanced mode needs the Accessibility service. Reverted to Express.',
+        ),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
   @override
   Widget build(BuildContext context) {
     final agent = ref.watch(authNotifierProvider).agent;
-
     return Scaffold(
       appBar: const CustomAppBar(
         title: 'Settings',
@@ -97,7 +155,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           // Profile Section
           _buildProfileSection(agent),
           const SizedBox(height: 20),
-
           // ===== W2.4D: Payment Settings (till/paybill) removed (D-W2-4).
           // Replaced with Hybrid-ordered service section: SIM Setup,
           // Message Processing, Processing Mode. Deferred items show
@@ -107,8 +164,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             _buildSettingsItem(
               icon: Icons.sim_card,
               title: 'SIM Setup',
-              subtitle: 'Coming in a later update',
-              onTap: () => _comingSoon('SIM Setup'),
+              subtitle: 'Choose SIMs for payments, dialing & replies',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SimSetupScreen()),
+              ),
             ),
             _buildSettingsItem(
               icon: Icons.sms,
@@ -134,7 +193,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _buildSectionHeader('Processing Mode'),
           _buildProcessingModeCard(),
           const SizedBox(height: 20),
-
           // Account Settings
           _buildSectionHeader('Account Settings'),
           _buildSettingsCard([
@@ -156,7 +214,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ]),
           const SizedBox(height: 20),
-
           // App Preferences
           _buildSectionHeader('App Preferences'),
           _buildSettingsCard([
@@ -218,7 +275,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ]),
           const SizedBox(height: 20),
-
           // Support
           _buildSectionHeader('Support'),
           _buildSettingsCard([
@@ -254,13 +310,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               },
             ),
           ]),
-
           const SizedBox(height: 40),
         ],
       ),
     );
   }
-
   Widget _buildProfileSection(AgentProfile? agent) {
     return Container(
       margin: const EdgeInsets.all(20),
@@ -346,7 +400,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (parts.isEmpty) return 'A';
     return parts[0].substring(0, 1).toUpperCase();
   }
-
   Widget _buildSectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -360,7 +413,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
     );
   }
-
   Widget _buildSettingsCard(List<Widget> children) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
@@ -380,7 +432,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
     );
   }
-
   Widget _buildSettingsItem({
     required IconData icon,
     required String title,
@@ -401,7 +452,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       onTap: onTap,
     );
   }
-
   Widget _buildSwitchItem({
     required IconData icon,
     required String title,
@@ -453,7 +503,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
     );
   }
-
   void _showSecurityOptions() {
     showModalBottomSheet(
       context: context,
@@ -487,7 +536,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       },
     );
   }
-
   void _showPinChangeDialog() {
     // Implement PIN change dialog
     showDialog(
@@ -495,7 +543,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       builder: (context) => const PinChangeDialog(),
     );
   }
-
   void _showAboutDialog() {
     showAboutDialog(
       context: context,
@@ -556,15 +603,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 }
-
 // PIN Change Dialog
 class PinChangeDialog extends StatefulWidget {
   const PinChangeDialog({super.key});
-
   @override
   State<PinChangeDialog> createState() => _PinChangeDialogState();
 }
-
 class _PinChangeDialogState extends State<PinChangeDialog> {
   final _oldPinController = TextEditingController();
   final _newPinController = TextEditingController();

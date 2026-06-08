@@ -30,14 +30,12 @@ import { SubscriptionPlansService } from '../subscriptions/subscription-plans.se
 import { SubscriptionPurchasesService } from '../subscriptions/subscription-purchases.service';
 import { SubscriptionPurchaseStatus } from '../subscriptions/entities/subscription-purchase.entity';
 import axios from 'axios';
-
 @Injectable()
 export class MpesaService {
   private readonly logger = new Logger(MpesaService.name);
   private readonly config = getMpesaConfig();
   private accessToken: string | null = null;
   private tokenExpiry: Date | null = null;
-
   constructor(
     private httpService: HttpService,
     @InjectRepository(MpesaTransaction)
@@ -47,7 +45,6 @@ export class MpesaService {
     private subscriptionPlansService: SubscriptionPlansService,
     private subscriptionPurchasesService: SubscriptionPurchasesService,
   ) {}
-
   async getAccessToken(): Promise<string> {
     if (this.accessToken && this.tokenExpiry && new Date() < this.tokenExpiry) {
       return this.accessToken;
@@ -75,7 +72,6 @@ export class MpesaService {
       );
     }
   }
-
   generatePassword(): { password: string; timestamp: string } {
     const timestamp = new Date()
       .toISOString()
@@ -138,7 +134,6 @@ export class MpesaService {
           },
         ),
       );
-
       const responseData = response.data;
       if (responseData.ResponseCode === '0') {
         transaction.checkoutRequestId = responseData.CheckoutRequestID;
@@ -170,46 +165,56 @@ export class MpesaService {
     }
   }
 
-  async handleCallback(callbackDto: MpesaCallbackDto): Promise<void> {
+  // FIX: Daraja sends the inner stkCallback fields in PascalCase
+  // (CheckoutRequestID, ResultCode, ResultDesc, CallbackMetadata). The previous
+  // camelCase reads were always undefined, so the lookup failed and the plan was
+  // never granted (and `.resultCode.toString()` would have thrown on undefined).
+  // Bound as `any` because the controller now passes the raw webhook body.
+  async handleCallback(callbackBody: any): Promise<void> {
     try {
-      const { stkCallback } = callbackDto.Body;
+      const stkCallback = callbackBody?.Body?.stkCallback;
+      if (!stkCallback) {
+        this.logger.warn('M-Pesa callback missing Body.stkCallback; ignoring.');
+        return;
+      }
+      const checkoutRequestId: string = stkCallback.CheckoutRequestID;
+      const resultCode = Number(stkCallback.ResultCode);
+      const resultDesc: string = stkCallback.ResultDesc;
       this.logger.log(
-        `Received M-Pesa callback for CheckoutRequestID: ${stkCallback.checkoutRequestID}`,
+        `Received M-Pesa callback for CheckoutRequestID: ${checkoutRequestId} (ResultCode=${resultCode})`,
       );
       const transaction = await this.mpesaTransactionRepository.findOne({
-        where: { checkoutRequestId: stkCallback.checkoutRequestID },
+        where: { checkoutRequestId },
       });
       if (!transaction) {
         // D-W2-A: unknown CheckoutRequestID — log and swallow. Controller
         // returns Success to Daraja regardless to prevent callback retries.
         this.logger.warn(
-          `Callback for unknown CheckoutRequestID: ${stkCallback.checkoutRequestID}. Ignoring.`,
+          `Callback for unknown CheckoutRequestID: ${checkoutRequestId}. Ignoring.`,
         );
         return;
       }
-      transaction.stkCallback = callbackDto.Body;
-      transaction.resultCode = stkCallback.resultCode.toString();
-      transaction.resultDesc = stkCallback.resultDesc;
-      if (stkCallback.resultCode === 0) {
+      transaction.stkCallback = callbackBody.Body;
+      transaction.resultCode = String(resultCode);
+      transaction.resultDesc = resultDesc;
+      if (resultCode === 0) {
         transaction.status = MpesaTransactionStatus.COMPLETED;
-        if (stkCallback.callbackMetadata && stkCallback.callbackMetadata.Item) {
-          const items = stkCallback.callbackMetadata.Item;
-          items.forEach((item) => {
-            if (item.Name === 'MpesaReceiptNumber') {
-              transaction.mpesaReceiptNumber = item.Value as string;
-            } else if (item.Name === 'TransactionDate') {
-              transaction.transactionDate = new Date(item.Value as number);
-            } else if (item.Name === 'PhoneNumber') {
-              transaction.phoneNumberUsed = (item.Value as number)?.toString();
-            }
-          });
+        const items = stkCallback.CallbackMetadata?.Item ?? [];
+        for (const item of items) {
+          if (item.Name === 'MpesaReceiptNumber') {
+            transaction.mpesaReceiptNumber = item.Value as string;
+          } else if (item.Name === 'TransactionDate') {
+            transaction.transactionDate = this.parseMpesaTimestamp(item.Value);
+          } else if (item.Name === 'PhoneNumber') {
+            transaction.phoneNumberUsed = String(item.Value);
+          }
         }
         await this.mpesaTransactionRepository.save(transaction);
         // Single grant path.
         await this.grantSubscriptionForTransaction(transaction);
       } else {
         transaction.status = MpesaTransactionStatus.FAILED;
-        transaction.errorMessage = stkCallback.resultDesc;
+        transaction.errorMessage = resultDesc;
         await this.mpesaTransactionRepository.save(transaction);
         // Mark the linked purchase FAILED so the client's poll terminates.
         await this.markPurchaseFailed(transaction);
@@ -219,6 +224,25 @@ export class MpesaService {
       const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error(`Callback handling failed: ${err.message}`, err.stack);
     }
+  }
+
+  /**
+   * Daraja's TransactionDate is YYYYMMDDHHmmss (e.g. 20260606144101), NOT epoch
+   * milliseconds — `new Date(20260606144101)` would land in the year ~2612.
+   */
+  private parseMpesaTimestamp(value: unknown): Date {
+    const s = String(value);
+    if (/^\d{14}$/.test(s)) {
+      const y = +s.slice(0, 4);
+      const mo = +s.slice(4, 6) - 1;
+      const d = +s.slice(6, 8);
+      const h = +s.slice(8, 10);
+      const mi = +s.slice(10, 12);
+      const se = +s.slice(12, 14);
+      return new Date(y, mo, d, h, mi, se);
+    }
+    const n = Number(value);
+    return isNaN(n) ? new Date() : new Date(n);
   }
 
   /**
@@ -259,7 +283,6 @@ export class MpesaService {
       `Granted plan for purchase ${purchase.id} (agent=${purchase.agentId}, package=${purchase.packageId}).`,
     );
   }
-
   private async markPurchaseFailed(
     transaction: MpesaTransaction,
   ): Promise<void> {
@@ -292,7 +315,6 @@ export class MpesaService {
       errorMessage: transaction.errorMessage,
     };
   }
-
   async getTransaction(id: string): Promise<MpesaTransaction> {
     const transaction = await this.mpesaTransactionRepository.findOne({
       where: { id },
@@ -302,7 +324,6 @@ export class MpesaService {
     }
     return transaction;
   }
-
   async getAgentTransactions(
     agentId: string,
     limit: number = 50,

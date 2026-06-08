@@ -1,31 +1,73 @@
 // lib/features/dashboard/presentation/providers/processing_provider.dart
-// W1 edits per Q3 lock:
-//   - _checkForPayments() body stubbed with AppLogger + return
-//   - _processPayment() body stubbed with AppLogger + return
-//   - State machine, timer plumbing, mode setter, public API all preserved
-//   - Token-balance read in startProcessing() updated to use hasUsableTokens
-// The full auto-processing-of-incoming-payments pipeline is W2/W3 territory.
-import 'dart:async';
+//
+// W3.N — reconciled onto the native-backed AppState master switch.
+//
+// What changed from W1/W2:
+//   - DELETED the duplicate `enum ProcessingMode {express, advanced}` — processing
+//     mode is the single wallet-backed value (WalletBalance.wallet.processingMode,
+//     wired in W3.I). Nothing here owns mode anymore.
+//   - ProcessingStatus {stopped, running, paused} is now the Dart mirror of Hybrid's
+//     AppState {STATE_STOPPED, STATE_RUNNING, STATE_PAUSED}. start/pause/stop persist
+//     the state to native via SessionBridge.saveAppState (the SMS receiver auto-processes
+//     only when AppState=='running'; the dialer reacts to it). Hybrid's DefaultAppControl
+//     is pure state (persist + StateFlow), so mirroring the string IS the whole job.
+//   - Transitions match Hybrid's HomeViewModel exactly:
+//       start  : validateStartup() guard → RUNNING  → "Processing started successfully"
+//       resume : RUNNING                            → "Processing resumed"
+//       pause  : PAUSED                             → "Processing paused"
+//       stop   : STOPPED                            → "Processing stopped successfully"
+//     The toggle() helper cycles start/pause/resume by current state (Hybrid toggleAppState).
+//   - validateStartup() ports Hybrid's startup guard for Pro's surface: starting in
+//     Advanced mode requires the accessibility service; otherwise it throws the Hybrid
+//     message and the state does NOT change.
+//   - DELETED the 10s Dart payment-poll Timer + _checkForPayments stub. Under Option C
+//     the native MpesaMessageListener is the real-time trigger (works backgrounded);
+//     a Dart timer only ticked while the app was open. Status reconciliation of the
+//     processed list comes from the backend (W3.G) — not a Dart poll.
+//   - snackbarMessage is exposed for the dashboard to surface Hybrid's exact toasts.
+//
+// PAUSED semantics (Hybrid parity, decision 4): PAUSED is a distinct state, NOT a full
+// stop. Hybrid's receiver ignores non-RUNNING for general M-Pesa, but `allowedWhenNotRunning`
+// transaction types still dial while paused (DialPausedTransactionsUseCase). We preserve
+// PAUSED as its own AppState so that door stays open; the paused-transaction dial queue
+// itself is a later slice (Pro has no paused-queue yet). For now PAUSED suspends M-Pesa
+// auto-processing (receiver gate is RUNNING-only) without collapsing into STOPPED.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../wallet/presentation/providers/wallet_provider.dart';
+import '../../../../shared/models/wallet_model.dart' show ProcessingMode;
+import '../../../../core/services/session_bridge_service.dart';
 import '../../../../core/utils/logger.dart';
 
 // ============================================================
-// TEST MODE FLAG
-// Set to true during testing to bypass plan checks.
-// Set to false before going live with real agents.
+// TEST MODE FLAG — W3.N: default false (real flow). Set true only to bypass the
+// plan check during isolated testing.
 // ============================================================
-const bool kTestMode = true;
-// Set to true to disable backend polling during USSD engine testing
-const bool kDisableBackendPolling = false;
+const bool kTestMode = false;
 
-enum ProcessingMode { express, advanced }
-
+/// Dart mirror of Hybrid's AppState. Names map 1:1:
+///   stopped ↔ STATE_STOPPED, running ↔ STATE_RUNNING, paused ↔ STATE_PAUSED.
 enum ProcessingStatus { stopped, running, paused }
+
+/// Thrown by validateStartup() when a precondition blocks starting. The message
+/// is surfaced verbatim to the agent (Hybrid behaviour).
+class StartupValidationException implements Exception {
+  final String message;
+  StartupValidationException(this.message);
+  @override
+  String toString() => message;
+}
+
+extension _AppStateWire on ProcessingStatus {
+  /// Native/Hybrid wire value for SessionBridge.saveAppState.
+  String get wire => switch (this) {
+        ProcessingStatus.stopped => 'stopped',
+        ProcessingStatus.running => 'running',
+        ProcessingStatus.paused => 'paused',
+      };
+}
 
 class ProcessingState {
   final ProcessingStatus status;
-  final ProcessingMode mode;
   final DateTime? startedAt;
   final DateTime? pausedAt;
   final int transactionsProcessed;
@@ -33,12 +75,11 @@ class ProcessingState {
   final double todayRevenue;
   final List<ProcessedTransaction> recentTransactions;
   final String? lastError;
-  final bool isCheckingPayments;
-  final DateTime? lastCheckTime;
+  /// One-shot toast text (Hybrid's snackbarMessage). Dashboard consumes + clears it.
+  final String? snackbarMessage;
 
   ProcessingState({
     this.status = ProcessingStatus.stopped,
-    this.mode = ProcessingMode.express,
     this.startedAt,
     this.pausedAt,
     this.transactionsProcessed = 0,
@@ -46,16 +87,13 @@ class ProcessingState {
     this.todayRevenue = 0.0,
     this.recentTransactions = const [],
     this.lastError,
-    this.isCheckingPayments = false,
-    this.lastCheckTime,
+    this.snackbarMessage,
   });
 
   bool get canProcess => status == ProcessingStatus.running;
-  bool get hasEnoughTokens => true;
 
   ProcessingState copyWith({
     ProcessingStatus? status,
-    ProcessingMode? mode,
     DateTime? startedAt,
     DateTime? pausedAt,
     int? transactionsProcessed,
@@ -63,12 +101,10 @@ class ProcessingState {
     double? todayRevenue,
     List<ProcessedTransaction>? recentTransactions,
     String? lastError,
-    bool? isCheckingPayments,
-    DateTime? lastCheckTime,
+    String? snackbarMessage,
   }) {
     return ProcessingState(
       status: status ?? this.status,
-      mode: mode ?? this.mode,
       startedAt: startedAt ?? this.startedAt,
       pausedAt: pausedAt ?? this.pausedAt,
       transactionsProcessed:
@@ -77,8 +113,7 @@ class ProcessingState {
       todayRevenue: todayRevenue ?? this.todayRevenue,
       recentTransactions: recentTransactions ?? this.recentTransactions,
       lastError: lastError,
-      isCheckingPayments: isCheckingPayments ?? this.isCheckingPayments,
-      lastCheckTime: lastCheckTime ?? this.lastCheckTime,
+      snackbarMessage: snackbarMessage,
     );
   }
 }
@@ -91,7 +126,6 @@ class ProcessedTransaction {
   final DateTime timestamp;
   final bool success;
   final int tokensUsed;
-
   ProcessedTransaction({
     required this.id,
     required this.customerPhone,
@@ -110,128 +144,141 @@ final processingProvider =
 
 class ProcessingNotifier extends StateNotifier<ProcessingState> {
   final Ref _ref;
-  Timer? _paymentCheckTimer;
-  bool _isProcessing = false;
-
   ProcessingNotifier(this._ref) : super(ProcessingState());
 
-Future<void> startProcessing() async {
-    try {
-      // W2.A (Flag A): removed dead till/paybill guard — those fields are
-      // dropped (D-W2-4). Payment-method setup is no longer a precondition;
-      // SIM-based identity (W4) replaces it.
+  SessionBridgeService get _bridge => _ref.read(sessionBridgeServiceProvider);
 
-      // W1: plan check via hasUsableTokens. Skipped in test mode.
-      if (!kTestMode) {
-        final walletState = _ref.read(walletNotifierProvider);
-        final hasUsable = walletState.balance?.hasUsableTokens ?? false;
-        if (!hasUsable) {
-          state = state.copyWith(
-            lastError: 'No active subscription plan. Please subscribe first.',
-          );
-          _showInsufficientTokens();
-          return;
-        }
-      } else {
-        AppLogger.d('[TEST MODE] Plan check bypassed for startProcessing');
+  /// Hybrid's startup guard, ported for Pro's surface. Currently the one relevant
+  /// precondition: Advanced mode requires the accessibility service to be enabled.
+  /// (Hybrid's other startup validations — SIM/socket — are W3.F/W5.) Throws with
+  /// the verbatim Hybrid message; callers do NOT change state on throw.
+  Future<void> _validateStartup() async {
+    final mode = _ref.read(walletNotifierProvider).balance?.wallet?.processingMode ??
+        ProcessingMode.express;
+    if (mode == ProcessingMode.advanced) {
+      final enabled = await _bridge.isAccessibilityEnabled();
+      if (!enabled) {
+        throw StartupValidationException(
+          "Failed. Advanced Mode requires Accessibility service to be enabled. "
+          "Please enable it in phone's settings then retry",
+        );
       }
-      state = state.copyWith(
-        status: ProcessingStatus.running,
+    }
+    // Plan check (skipped in test mode). Hybrid gates startup on entitlement too.
+    if (!kTestMode) {
+      final hasUsable =
+          _ref.read(walletNotifierProvider).balance?.hasUsableTokens ?? false;
+      if (!hasUsable) {
+        throw StartupValidationException(
+          'No active subscription plan. Please subscribe first.',
+        );
+      }
+    }
+  }
+
+  /// Persist + mirror the AppState to native, then update local state.
+  Future<void> _applyState(ProcessingStatus status,
+      {String? snackbar, DateTime? startedAt, DateTime? pausedAt}) async {
+    await _bridge.saveAppState(status.wire);
+    state = state.copyWith(
+      status: status,
+      startedAt: startedAt,
+      pausedAt: pausedAt,
+      lastError: null,
+      snackbarMessage: snackbar,
+    );
+  }
+
+  /// START (STOPPED → RUNNING). Hybrid: validateStartup → RUNNING →
+  /// "Processing started successfully".
+  Future<void> startProcessing() async {
+    try {
+      await _validateStartup();
+      await _applyState(
+        ProcessingStatus.running,
+        snackbar: 'Processing started successfully',
         startedAt: DateTime.now(),
-        lastError: null,
       );
-      _startPaymentMonitoring();
-      AppLogger.logSessionEvent(
-        event: kTestMode
-            ? '[TEST MODE] Processing started'
-            : 'Processing started',
-        details: 'Mode: ${state.mode}',
-      );
+      AppLogger.logSessionEvent(event: 'Processing started');
+    } on StartupValidationException catch (e) {
+      // State unchanged; surface the message (Hybrid sets snackbar + leaves state).
+      state = state.copyWith(lastError: e.message, snackbarMessage: e.message);
     } catch (e) {
       state = state.copyWith(
-        lastError: 'Failed to start processing: ${e.toString()}',
+        lastError: 'Failed to start processing: $e',
+        snackbarMessage: 'Failed to start processing',
       );
     }
   }
 
-  void pauseProcessing() {
-    state = state.copyWith(
-      status: ProcessingStatus.paused,
+  /// RESUME (PAUSED → RUNNING). Hybrid: validateStartup → RUNNING →
+  /// "Processing resumed".
+  Future<void> resumeProcessing() async {
+    try {
+      await _validateStartup();
+      await _applyState(
+        ProcessingStatus.running,
+        snackbar: 'Processing resumed',
+        startedAt: state.startedAt ?? DateTime.now(),
+      );
+      AppLogger.logSessionEvent(event: 'Processing resumed');
+    } on StartupValidationException catch (e) {
+      state = state.copyWith(lastError: e.message, snackbarMessage: e.message);
+    } catch (e) {
+      state = state.copyWith(
+        lastError: 'Failed to resume processing: $e',
+        snackbarMessage: 'Failed to resume processing',
+      );
+    }
+  }
+
+  /// PAUSE (RUNNING → PAUSED). Hybrid: PAUSED → "Processing paused".
+  Future<void> pauseProcessing() async {
+    await _applyState(
+      ProcessingStatus.paused,
+      snackbar: 'Processing paused',
+      startedAt: state.startedAt,
       pausedAt: DateTime.now(),
     );
-    _paymentCheckTimer?.cancel();
     AppLogger.logSessionEvent(event: 'Processing paused');
   }
 
-  void stopProcessing() {
+  /// STOP (→ STOPPED). Hybrid: STOPPED → "Processing stopped successfully".
+  /// Resets runtime counters but preserves the session's processed list for the
+  /// dashboard until the next refresh.
+  Future<void> stopProcessing() async {
+    await _bridge.saveAppState(ProcessingStatus.stopped.wire);
     state = ProcessingState(
-      mode: state.mode,
+      status: ProcessingStatus.stopped,
       transactionsProcessed: state.transactionsProcessed,
       tokensConsumed: state.tokensConsumed,
       todayRevenue: state.todayRevenue,
       recentTransactions: state.recentTransactions,
+      snackbarMessage: 'Processing stopped successfully',
     );
-    _paymentCheckTimer?.cancel();
     AppLogger.logSessionEvent(event: 'Processing stopped');
   }
 
-  void setMode(ProcessingMode mode) {
-    state = state.copyWith(mode: mode);
-    AppLogger.logSessionEvent(
-      event: 'Processing mode changed',
-      details: 'New mode: $mode',
-    );
-  }
-
-  void _startPaymentMonitoring() {
-    _paymentCheckTimer?.cancel();
-    if (kDisableBackendPolling) {
-      AppLogger.d(
-          '[TEST MODE] Backend polling disabled - using native SMS listener only');
-      return;
-    }
-    _paymentCheckTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
-      if (state.status == ProcessingStatus.running && !_isProcessing) {
-        _checkForPayments();
-      }
-    });
-  }
-
-  // ===== W1 STUB per Q3 lock =====
-  // The previous implementation called walletRepo.checkForPayments() (deleted
-  // in W1) and findProductByPrice() (deleted in W1). The whole "poll backend
-  // for new M-Pesa payments → look up product by amount → execute USSD" flow
-  // is W2/W3 territory. Stub here keeps the timer + state machine working.
-  Future<void> _checkForPayments() async {
-    if (_isProcessing) return;
-    _isProcessing = true;
-    state = state.copyWith(
-      isCheckingPayments: true,
-      lastCheckTime: DateTime.now(),
-    );
-    try {
-      AppLogger.d(
-        '[W1-STUB] _checkForPayments() — auto-processing pipeline reconnected in W2',
-      );
-      // TODO(wave-2): reconnect to offer-execution pipeline.
-      //   1. Read incoming M-Pesa payments (SMS listener already does this on Kotlin side)
-      //   2. For each payment, match its amount to an active Offer
-      //   3. Execute the offer's USSD template against payment.customerPhone
-      //   4. Decrement the active SubscriptionPlan (LIMITED) via backend
-    } catch (e) {
-      AppLogger.e('Payment check stub failed:', e);
-    } finally {
-      _isProcessing = false;
-      state = state.copyWith(isCheckingPayments: false);
+  /// Hybrid's toggleAppState: cycles by current state.
+  ///   STOPPED → start ; RUNNING → pause ; PAUSED → resume.
+  Future<void> toggleProcessing() async {
+    switch (state.status) {
+      case ProcessingStatus.stopped:
+        await startProcessing();
+        break;
+      case ProcessingStatus.running:
+        await pauseProcessing();
+        break;
+      case ProcessingStatus.paused:
+        await resumeProcessing();
+        break;
     }
   }
 
-  void _showPaymentSetupRequired() {}
-  void _showInsufficientTokens() {}
-
-  @override
-  void dispose() {
-    _paymentCheckTimer?.cancel();
-    super.dispose();
+  /// Dashboard calls this after showing the snackbar so it fires once.
+  void clearSnackbar() {
+    if (state.snackbarMessage != null) {
+      state = state.copyWith(snackbarMessage: null);
+    }
   }
 }

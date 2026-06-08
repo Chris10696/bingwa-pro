@@ -8,8 +8,17 @@
 //   - _buildTransactionItem icon switch updated for new TransactionType enum
 //   - _buildProductDetails removed (no callers after Popular Products gone)
 //   - Wired TokenBalanceIndicator into GradientAppBar.actions
-// Debug test panel (kDebugMode-gated) retained unchanged — primer doesn't touch
-// the Kotlin side; the panel becomes inert until W3 ships the new USSD pipeline.
+// W3.N edits:
+//   - Processing FAB → Hybrid toggle+stop layout (toggleProcessing / stopProcessing)
+//   - Snackbar listener surfaces Hybrid's exact AppState toasts
+// Debug test panel (kDebugMode-gated) retained — now drives the real W3.K path
+// (injectTestPayment → /sms-create → pipeline).
+// W3.G edits:
+//   - Live reconcile: auto-refresh dashboard data while AppState is RUNNING
+//     (Pro's equivalent of Hybrid HomeViewModel.liveTransactions reactive observe)
+//   - Processing badge shows today's real processed count from backend stats
+//     instead of the inert in-memory counter
+import 'dart:async';
 import 'package:bingwa_pro/features/dashboard/presentation/providers/processing_provider.dart';
 import 'package:bingwa_pro/features/transactions/presentation/providers/transaction_provider.dart';
 import 'package:bingwa_pro/features/wallet/presentation/providers/wallet_provider.dart';
@@ -27,23 +36,43 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../core/security/secure_storage_manager.dart';
 import '../providers/dashboard_provider.dart';
+import 'package:bingwa_pro/features/auth/presentation/providers/auth_provider.dart';
+import '../providers/airtime_provider.dart';
 import '../../../../shared/models/transaction_model.dart';
 import '../../../../shared/models/subscription_plan_model.dart';
 import '../../../../shared/models/subscription_package_model.dart' show SubscriptionType;
-
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
-
   @override
   ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
 }
-
 class _DashboardScreenState extends ConsumerState<DashboardScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _scrollController = ScrollController();
   bool _showScrollTopButton = false;
   static const _testChannel = MethodChannel('bingwa_pro/test');
+
+  // W3.G: live reconcile. While AppState is RUNNING the dashboard polls the
+  // backend so pipeline transitions (SCHEDULED→PROCESSING→SUCCESS/FAILED) and
+  // the processed count surface without a manual pull-to-refresh — Pro's
+  // equivalent of Hybrid's reactive liveTransactions StateFlow. Cancelled when
+  // paused/stopped and on dispose.
+  Timer? _liveRefreshTimer;
+  static const _liveRefreshInterval = Duration(seconds: 12);
+
+  void _startLiveRefresh() {
+    if (_liveRefreshTimer != null) return;
+    _liveRefreshTimer = Timer.periodic(_liveRefreshInterval, (_) {
+      if (!mounted) return;
+      ref.read(dashboardNotifierProvider.notifier).refresh();
+    });
+  }
+
+  void _stopLiveRefresh() {
+    _liveRefreshTimer?.cancel();
+    _liveRefreshTimer = null;
+  }
 
   @override
   void initState() {
@@ -52,9 +81,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(dashboardNotifierProvider.notifier).loadDashboardData();
+      // If the engine is already RUNNING when the dashboard mounts, begin polling.
+      if (ref.read(processingProvider).status == ProcessingStatus.running) {
+        _startLiveRefresh();
+      }
     });
   }
-
   void _onScroll() {
     if (_scrollController.offset > 100 && !_showScrollTopButton) {
       setState(() => _showScrollTopButton = true);
@@ -62,9 +94,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       setState(() => _showScrollTopButton = false);
     }
   }
-
   @override
   void dispose() {
+    _stopLiveRefresh();
     _tabController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -104,7 +136,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       );
     }
   }
-
   void _showTestInjectionDialog() {
     showDialog(
       context: context,
@@ -159,18 +190,54 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final state = ref.watch(dashboardNotifierProvider);
     final notifier = ref.read(dashboardNotifierProvider.notifier);
 
+    // W3.N: surface Hybrid's AppState toasts (started/paused/resumed/stopped,
+    // and validateStartup failures) once each.
+    ref.listen<ProcessingState>(processingProvider, (prev, next) {
+      // W3.G: drive live polling with the engine's run state.
+      if (prev?.status != next.status) {
+        if (next.status == ProcessingStatus.running) {
+          _startLiveRefresh();
+        } else {
+          _stopLiveRefresh();
+        }
+      }
+      final msg = next.snackbarMessage;
+      if (msg != null && msg != prev?.snackbarMessage) {
+        final isError = msg.startsWith('Failed') || msg.startsWith('No active');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: isError ? Colors.red : const Color(0xFF00C853),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        ref.read(processingProvider.notifier).clearSnackbar();
+      }
+    });
+    // Airtime check errors → snackbar (the *144# dial failed / not parseable).
+    ref.listen<AirtimeState>(airtimeProvider, (prev, next) {
+      if (next.errorMessage != null &&
+          prev?.errorMessage != next.errorMessage) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.errorMessage!),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    });
+
     if (state.isLoading && state.agent == null) {
       return const Scaffold(
         body: LoadingIndicator(message: 'Loading dashboard...'),
       );
     }
-
     // Read hasUsableTokens from wallet provider so the app-bar indicator can
     // react to subscription state without dashboard_provider tracking it.
     final hasUsableTokens = ref.watch(walletNotifierProvider.select(
       (s) => s.balance?.hasUsableTokens ?? false,
     ));
-
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: GradientAppBar(
@@ -187,6 +254,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           controller: _scrollController,
           slivers: [
             SliverToBoxAdapter(child: _buildTopStats(state)),
+            SliverToBoxAdapter(child: _buildAirtimeCard()),
             if (state.showHealthWarning)
               SliverToBoxAdapter(child: _buildHealthWarning(state)),
             if (kDebugMode) SliverToBoxAdapter(child: _buildTestPanel()),
@@ -241,9 +309,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           ),
           const SizedBox(height: 6),
           const Text(
-            'Injects a fake KES 20 payment → routes to 250mb_24hrs → '
-            'builds USSD code *180*5*2*0712345678*6*1#. '
-            'Watch Logcat: filter by "MpesaListener" and "UssdEngine".',
+            'Injects a fake KES 20 M-Pesa payment → /sms-create → matched offer '
+            'runs through the real pipeline. '
+            'Watch Logcat: filter by "MpesaListener", "SmsCreatePoster", "UssdEngine".',
             style: TextStyle(fontSize: 11, color: Colors.black87),
           ),
           const SizedBox(height: 10),
@@ -283,63 +351,59 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 
-  // Processing FAB — unchanged
+  // Processing FAB — W3.N: Hybrid's toggle + stop layout.
+  // One toggle button (play↔pause by state) + a stop button when not stopped.
   Widget _buildProcessingFAB() {
     final processingState = ref.watch(processingProvider);
     final processingNotifier = ref.read(processingProvider.notifier);
-    if (processingState.status == ProcessingStatus.running) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildStatusBadge(
-            Colors.green,
-            'Processing: ${processingState.transactionsProcessed} txns',
-          ),
+    final status = processingState.status;
+
+    final isRunning = status == ProcessingStatus.running;
+    final isStopped = status == ProcessingStatus.stopped;
+
+    // W3.G: today's processed count from real backend stats (successful + failed),
+    // not the inert in-memory counter. Falls back to 0 until stats load.
+    final stats = ref.watch(dashboardNotifierProvider).stats;
+    final processedToday = stats == null
+        ? 0
+        : (stats.successfulTransactions + stats.failedTransactions);
+
+    final badge = switch (status) {
+      ProcessingStatus.running => _buildStatusBadge(
+          Colors.green,
+          'Processing · $processedToday today',
+        ),
+      ProcessingStatus.paused => _buildStatusBadge(Colors.orange, 'Paused'),
+      ProcessingStatus.stopped => const SizedBox.shrink(),
+    };
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!isStopped) ...[
+          badge,
           const SizedBox(height: 10),
-          FloatingActionButton(
-            heroTag: 'pause',
-            onPressed: () => processingNotifier.pauseProcessing(),
-            backgroundColor: Colors.orange,
-            child: const Icon(Icons.pause),
-          ),
+        ],
+        // Toggle: play when stopped/paused, pause when running (Hybrid toggleAppState).
+        FloatingActionButton(
+          heroTag: 'toggle',
+          onPressed: () => processingNotifier.toggleProcessing(),
+          backgroundColor:
+              isRunning ? Colors.orange : const Color(0xFF00C853),
+          child: Icon(isRunning ? Icons.pause : Icons.play_arrow),
+        ),
+        // Stop is available whenever processing is engaged (running or paused).
+        if (!isStopped) ...[
           const SizedBox(height: 10),
           FloatingActionButton(
             heroTag: 'stop',
-            onPressed: () => processingNotifier.stopProcessing(),
-            backgroundColor: Colors.red,
-            child: const Icon(Icons.stop),
-          ),
-        ],
-      );
-    }
-    if (processingState.status == ProcessingStatus.paused) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildStatusBadge(Colors.orange, 'Paused'),
-          const SizedBox(height: 10),
-          FloatingActionButton(
-            heroTag: 'resume',
-            onPressed: () => processingNotifier.startProcessing(),
-            backgroundColor: const Color(0xFF00C853),
-            child: const Icon(Icons.play_arrow),
-          ),
-          const SizedBox(height: 10),
-          FloatingActionButton(
-            heroTag: 'stopFromPause',
             onPressed: () => processingNotifier.stopProcessing(),
             backgroundColor: Colors.red,
             mini: true,
             child: const Icon(Icons.stop),
           ),
         ],
-      );
-    }
-    return FloatingActionButton(
-      heroTag: 'start',
-      onPressed: () => processingNotifier.startProcessing(),
-      backgroundColor: const Color(0xFF00C853),
-      child: const Icon(Icons.play_arrow),
+      ],
     );
   }
 
@@ -370,7 +434,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ),
     );
   }
-
   // Drawer — unchanged (all destinations route to surviving screens)
   Widget _buildDrawer(DashboardState state) {
     return Drawer(
@@ -459,7 +522,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ),
     );
   }
-
   Widget _drawerSection(String title) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
         child: Text(
@@ -483,7 +545,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         title: Text(title),
         onTap: onTap,
       );
-
   // ─────────────────────────────────────────────────────────────────────────
   // Top stats card — REPLACED "Token Balance KES" with plan-status readout (Q2)
   // ─────────────────────────────────────────────────────────────────────────
@@ -558,6 +619,90 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 
+  // Airtime balance card — the refresh button dials *144# natively via
+  // AirtimeChecker (bingwa_pro/airtime). "Airtime Used Today" from the Hybrid
+  // reference is omitted here: Pro has no data source for per-day airtime spend
+  // yet, so it isn't fabricated.
+  Widget _buildAirtimeCard() {
+    final airtime = ref.watch(airtimeProvider);
+    final balanceText = airtime.balanceKes == null
+        ? 'Ksh —'
+        : 'Ksh ${airtime.balanceKes!.toStringAsFixed(2)}';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(15, 0, 15, 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withAlpha(25),
+            blurRadius: 10,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00C853).withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.account_balance_wallet,
+                color: Color(0xFF00C853), size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Airtime Balance',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+                const SizedBox(height: 4),
+                if (airtime.isChecking)
+                  Row(
+                    children: const [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'Checking *144#…',
+                        style: TextStyle(fontSize: 14, color: Colors.grey),
+                      ),
+                    ],
+                  )
+                else
+                  Text(
+                    balanceText,
+                    style: const TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Check airtime (*144#)',
+            onPressed: airtime.isChecking
+                ? null
+                : () => ref.read(airtimeProvider.notifier).refresh(),
+            icon: Icon(
+              Icons.refresh,
+              color:
+                  airtime.isChecking ? Colors.grey : const Color(0xFF00C853),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Q2 plan-status readout. Stacks Unlimited and Limited if both active.
   /// Shows "No active plan" if neither, with a Subscribe button to /wallet.
   Widget _buildPlanStatus(List<SubscriptionPlan> plans) {
@@ -576,10 +721,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           (p.tokensRemaining ?? 0) > 0,
       orElse: () => _emptyPlan(),
     );
-
     final hasUnlimited = unlimited.id != _emptyPlanId;
     final hasLimited = limited.id != _emptyPlanId;
-
     if (!hasUnlimited && !hasLimited) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -612,7 +755,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         ],
       );
     }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -655,7 +797,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         purchasedAt: DateTime.fromMillisecondsSinceEpoch(0),
         isActive: false,
       );
-
   /// Formats remaining duration as Xd Yh, falling back to smaller units.
   String _formatRemainingDuration(DateTime expiresAt) {
     final remaining = expiresAt.difference(DateTime.now());
@@ -668,7 +809,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     if (minutes >= 1) return '${minutes}m';
     return '<1m';
   }
-
   Widget _buildHealthWarning(DashboardState state) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
@@ -710,7 +850,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ),
     );
   }
-
   void _showHealthDetails(UssdHealthCheck? health) {
     showDialog(
       context: context,
@@ -794,7 +933,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ],
     );
   }
-
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -823,7 +961,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ),
     );
   }
-
   // ─────────────────────────────────────────────────────────────────────────
   // Tabs — Quick Actions + Popular Products removed from Overview tab
   // ─────────────────────────────────────────────────────────────────────────
@@ -863,7 +1000,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ),
     );
   }
-
   Widget _buildAnalyticsTab(DashboardState state) {
     return Center(
       child: Column(
@@ -882,7 +1018,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ),
     );
   }
-
   // Recent transactions section
   Widget _buildRecentTransactions(DashboardState state) {
     final transactions = state.recentTransactions ?? [];
@@ -1113,7 +1248,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           ],
         ),
       );
-
   // Performance chart — unchanged (uses placeholder data; W5 wires real backend data)
   Widget _buildPerformanceChart(DashboardState state) {
     final weekData = [12000.0, 15000.0, 8000.0, 22000.0, 18000.0, 25000.0, 20000.0];
@@ -1216,7 +1350,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       ),
     );
   }
-
   Widget _buildBottomNavigation() {
     return BottomNavigationBar(
       currentIndex: 0,
@@ -1263,7 +1396,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               Navigator.pop(ctx);
               AppLogger.logSessionEvent(
                   event: 'Manual logout from dashboard');
-              await SecureStorageManager.clearAll();
+              // Must clear auth STATE (not just storage) so the router redirect
+              // releases /dashboard — matches the working settings logout. This
+              // also clears the SessionBridge mirror + stops the W3.J heartbeat.
+              try {
+                await ref.read(authNotifierProvider.notifier).logout();
+                await SecureStorageManager.clearAll();
+              } catch (_) {
+                await SecureStorageManager.clearAll();
+              }
               if (mounted) context.go('/login');
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -1274,7 +1415,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 }
-
 class _TabBarDelegate extends SliverPersistentHeaderDelegate {
   final TabController _tabController;
   _TabBarDelegate(this._tabController);
@@ -1296,7 +1436,6 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
       ),
     );
   }
-
   @override
   double get maxExtent => 48;
   @override
