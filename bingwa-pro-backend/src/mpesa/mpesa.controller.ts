@@ -1,5 +1,16 @@
 // bingwa-pro-backend/src/mpesa/mpesa.controller.ts
-import { Controller, Post, Get, Body, Param, Query, UseGuards, HttpCode, HttpStatus, Req } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  Req,
+} from '@nestjs/common';
 import { MpesaService } from './mpesa.service';
 import { StkPushRequestDto } from './dto/stk-push-request.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -52,12 +63,12 @@ export class MpesaController {
    */
   @Get('transactions')
   @UseGuards(JwtAuthGuard)
-  async getAgentTransactions(
-    @Req() req,
-    @Query('limit') limit?: string,
-  ) {
+  async getAgentTransactions(@Req() req, @Query('limit') limit?: string) {
     const agentId = req.user.sub;
-    return this.mpesaService.getAgentTransactions(agentId, limit ? parseInt(limit) : 50);
+    return this.mpesaService.getAgentTransactions(
+      agentId,
+      limit ? parseInt(limit) : 50,
+    );
   }
   /**
    * Simulate callback (sandbox only)

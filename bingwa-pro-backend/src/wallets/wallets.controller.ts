@@ -55,7 +55,10 @@ export class WalletsController {
 
   @Post('confirm/:purchaseId')
   @UseGuards(JwtAuthGuard)
-  async confirmPayment(@Request() req, @Param('purchaseId') purchaseId: string) {
+  async confirmPayment(
+    @Request() req,
+    @Param('purchaseId') purchaseId: string,
+  ) {
     return this.walletsService.confirmPayment(req.user.sub, purchaseId);
   }
 

@@ -218,9 +218,8 @@ export class TransactionsService {
     // createFromSms's SCHEDULED branch: the device dials immediately after this
     // response, so debiting here mirrors DialUssdUseCase.invoke's pre-enqueue
     // checkIfShouldUpdateTokens. FAILED dials still consume the token.
-    const debited = await this.subscriptionPlansService.decrementLimitedToken(
-      agentId,
-    );
+    const debited =
+      await this.subscriptionPlansService.decrementLimitedToken(agentId);
     if (debited) {
       const wallet = await this.walletsRepository.findOne({
         where: { agentId },
@@ -376,9 +375,8 @@ export class TransactionsService {
     // immediately after this response; debiting here is the closest backend
     // equivalent to DialUssdUseCase.invoke's pre-enqueue debit. FAILED dials
     // still consume a token — matches Hybrid's per-attempt economics.
-    const debited = await this.subscriptionPlansService.decrementLimitedToken(
-      agentId,
-    );
+    const debited =
+      await this.subscriptionPlansService.decrementLimitedToken(agentId);
     if (debited) {
       const wallet = await this.walletsRepository.findOne({
         where: { agentId },
@@ -456,7 +454,7 @@ export class TransactionsService {
       rescheduleInfo: {
         scheduledFor: data.scheduledFor,
         isRecurring: data.isRecurring,
-        daysRemaining: data.isRecurring ? data.daysToRecur ?? null : null,
+        daysRemaining: data.isRecurring ? (data.daysToRecur ?? null) : null,
       },
     });
     return this.transactionsRepository.save(transaction);
@@ -534,7 +532,7 @@ export class TransactionsService {
             errorMessage: optionsOrErrorMessage,
             safaricomReference: legacySafaricomRef,
           }
-        : optionsOrErrorMessage ?? {};
+        : (optionsOrErrorMessage ?? {});
     const transaction = await this.transactionsRepository.findOne({
       where: { id: transactionId },
       relations: ['agent'],

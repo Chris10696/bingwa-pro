@@ -72,7 +72,7 @@ export class Transaction {
   @Column({ type: 'enum', enum: TransactionType })
   type: TransactionType;
 
-  @Column('decimal', { precision: 15, scale: 2, transformer: decimalToNumber  })
+  @Column('decimal', { precision: 15, scale: 2, transformer: decimalToNumber })
   amount: number;
 
   @Column({ nullable: true })
@@ -157,16 +157,31 @@ export class Transaction {
   @Column({ default: 0 })
   tokenAmount: number;
 
-  @Column('decimal', { precision: 15, scale: 2, default: 0, transformer: decimalToNumber  })
+  @Column('decimal', {
+    precision: 15,
+    scale: 2,
+    default: 0,
+    transformer: decimalToNumber,
+  })
   commission: number;
 
   @Column('jsonb', { nullable: true })
   metadata: Record<string, any>;
 
-  @Column('decimal', { precision: 15, scale: 2, nullable: true, transformer: decimalToNumber  })
+  @Column('decimal', {
+    precision: 15,
+    scale: 2,
+    nullable: true,
+    transformer: decimalToNumber,
+  })
   balanceBefore: number;
 
-  @Column('decimal', { precision: 15, scale: 2, nullable: true, transformer: decimalToNumber  })
+  @Column('decimal', {
+    precision: 15,
+    scale: 2,
+    nullable: true,
+    transformer: decimalToNumber,
+  })
   balanceAfter: number;
 
   @Column({ nullable: true })

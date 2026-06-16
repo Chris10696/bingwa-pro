@@ -34,7 +34,9 @@
 // auto-processing (receiver gate is RUNNING-only) without collapsing into STOPPED.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../wallet/presentation/providers/wallet_provider.dart';
-import '../../../../shared/models/wallet_model.dart' show ProcessingMode;
+import '../../../../shared/repositories/wallet_repository.dart';
+import '../../../../shared/models/wallet_model.dart'
+    show ProcessingMode, WalletBalance;
 import '../../../../core/services/session_bridge_service.dart';
 import '../../../../core/utils/logger.dart';
 
@@ -153,8 +155,23 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
   /// (Hybrid's other startup validations — SIM/socket — are W3.F/W5.) Throws with
   /// the verbatim Hybrid message; callers do NOT change state on throw.
   Future<void> _validateStartup() async {
-    final mode = _ref.read(walletNotifierProvider).balance?.wallet?.processingMode ??
-        ProcessingMode.express;
+    // Fetch a FRESH balance from the backend rather than reading a cached value.
+    // The play button lives on the dashboard, which loads dashboardNotifierProvider —
+    // a DIFFERENT provider than walletNotifierProvider. The wallet provider is only
+    // populated when the agent opens the Subscription screen, so reading its cache
+    // here returned a false "No active subscription plan" whenever it had not loaded
+    // yet (and a stale answer otherwise) — even with a valid, token-bearing plan.
+    // The backend is the single source of truth for entitlement, so ask it directly.
+    // On a network failure, fall back to any cached value so a transient blip can't
+    // block a known-good plan.
+    WalletBalance? balance;
+    try {
+      balance = await _ref.read(walletRepositoryProvider).getWalletBalance();
+    } catch (_) {
+      balance = _ref.read(walletNotifierProvider).balance;
+    }
+
+    final mode = balance?.wallet?.processingMode ?? ProcessingMode.express;
     if (mode == ProcessingMode.advanced) {
       final enabled = await _bridge.isAccessibilityEnabled();
       if (!enabled) {
@@ -166,8 +183,7 @@ class ProcessingNotifier extends StateNotifier<ProcessingState> {
     }
     // Plan check (skipped in test mode). Hybrid gates startup on entitlement too.
     if (!kTestMode) {
-      final hasUsable =
-          _ref.read(walletNotifierProvider).balance?.hasUsableTokens ?? false;
+      final hasUsable = balance?.hasUsableTokens ?? false;
       if (!hasUsable) {
         throw StartupValidationException(
           'No active subscription plan. Please subscribe first.',

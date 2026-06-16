@@ -148,10 +148,7 @@ export class TransactionsController {
   @Get('summary/:period')
   @UseGuards(JwtAuthGuard)
   async getTransactionSummary(@Request() req, @Param('period') period: string) {
-    return this.transactionsService.getTransactionSummary(
-      req.user.sub,
-      period,
-    );
+    return this.transactionsService.getTransactionSummary(req.user.sub, period);
   }
 
   // ===== W3.G device→backend status reporting — BEFORE /:id =====
@@ -164,16 +161,12 @@ export class TransactionsController {
     @Param('id') id: string,
     @Body() body: UpdateTransactionStatusDto,
   ) {
-    return this.transactionsService.updateTransactionStatus(
-      id,
-      body.status,
-      {
-        errorMessage: body.errorMessage,
-        ussdResponse: body.ussdResponse,
-        safaricomReference: body.safaricomReference,
-        agentId: req.user.sub, // ownership guard (B4-part-1 flag, now closed)
-      },
-    );
+    return this.transactionsService.updateTransactionStatus(id, body.status, {
+      errorMessage: body.errorMessage,
+      ussdResponse: body.ussdResponse,
+      safaricomReference: body.safaricomReference,
+      agentId: req.user.sub, // ownership guard (B4-part-1 flag, now closed)
+    });
   }
 
   // ===== /:id routes — declared LAST =====

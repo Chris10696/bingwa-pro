@@ -24,7 +24,9 @@ export class UssdService {
 
   // ─── Africa's Talking callback (public) ──────────────────────────────
   async handleAfricaTalkingCallback(body: any): Promise<string> {
-    this.logger.log('[W1-STUB] handleAfricaTalkingCallback — W3 wiring deferred');
+    this.logger.log(
+      '[W1-STUB] handleAfricaTalkingCallback — W3 wiring deferred',
+    );
     return 'END Service temporarily unavailable. Please try again later.';
   }
 

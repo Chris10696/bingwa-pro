@@ -12,7 +12,9 @@ export class SubscriptionPackagesService {
     private packagesRepository: Repository<SubscriptionPackage>,
   ) {}
 
-  async findAll(includeInactive: boolean = false): Promise<SubscriptionPackage[]> {
+  async findAll(
+    includeInactive: boolean = false,
+  ): Promise<SubscriptionPackage[]> {
     const where = includeInactive ? {} : { isActive: true };
     return this.packagesRepository.find({
       where,
@@ -23,7 +25,9 @@ export class SubscriptionPackagesService {
   async findOne(id: string): Promise<SubscriptionPackage> {
     const pkg = await this.packagesRepository.findOne({ where: { id } });
     if (!pkg) {
-      throw new NotFoundException(`SubscriptionPackage with ID ${id} not found`);
+      throw new NotFoundException(
+        `SubscriptionPackage with ID ${id} not found`,
+      );
     }
     return pkg;
   }

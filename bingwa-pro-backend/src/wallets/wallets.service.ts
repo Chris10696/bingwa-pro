@@ -71,7 +71,11 @@ export class WalletsService {
   }
 
   async getPurchases(agentId: string, limit: number, offset: number) {
-    return this.subscriptionPurchasesService.findByAgent(agentId, limit, offset);
+    return this.subscriptionPurchasesService.findByAgent(
+      agentId,
+      limit,
+      offset,
+    );
   }
 
   /**
@@ -121,7 +125,10 @@ export class WalletsService {
       amountPaid: pkg.price,
       paymentReference: stk.checkoutRequestId, // join key to MpesaTransaction
       status: SubscriptionPurchaseStatus.PENDING,
-      metadata: { stkPhone: darajaPhone, merchantRequestId: stk.merchantRequestId },
+      metadata: {
+        stkPhone: darajaPhone,
+        merchantRequestId: stk.merchantRequestId,
+      },
     });
 
     this.logger.log(
@@ -144,7 +151,8 @@ export class WalletsService {
    * the current status so the client UI can resolve its spinner.
    */
   async confirmPayment(agentId: string, purchaseId: string) {
-    const purchase = await this.subscriptionPurchasesService.findOne(purchaseId);
+    const purchase =
+      await this.subscriptionPurchasesService.findOne(purchaseId);
     if (!purchase || purchase.agentId !== agentId) {
       return {
         transactionId: purchaseId,

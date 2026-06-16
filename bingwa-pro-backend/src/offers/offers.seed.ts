@@ -17,14 +17,54 @@ export interface DefaultOfferRow {
 
 // The 8 Hybrid default Data offers (Hybrid "My Offers" screen).
 export const DEFAULT_OFFERS: DefaultOfferRow[] = [
-  { name: '1.5 GB - 3 Hrs', ussdCode: '*180*5*2*BH*1*1#', price: 50, type: OfferType.DATA },
-  { name: '350 MBS - 7 Days', ussdCode: '*180*5*2*BH*2*1#', price: 49, type: OfferType.DATA },
-  { name: '2.5GB - 7 Days', ussdCode: '*180*5*2*BH*3*1#', price: 300, type: OfferType.DATA },
-  { name: '6GB - 7 Days', ussdCode: '*180*5*2*BH*4*1#', price: 700, type: OfferType.DATA },
-  { name: '1GB - 1Hr', ussdCode: '*180*5*2*BH*5*1#', price: 19, type: OfferType.DATA },
-  { name: '250MBS - 24 Hrs', ussdCode: '*180*5*2*BH*6*1#', price: 20, type: OfferType.DATA },
-  { name: '1GB - 24 Hrs', ussdCode: '*180*5*2*BH*7*1#', price: 99, type: OfferType.DATA },
-  { name: '1.25GB - Until Midnight', ussdCode: '*180*5*2*BH*8*1#', price: 55, type: OfferType.DATA },
+  {
+    name: '1.5 GB - 3 Hrs',
+    ussdCode: '*180*5*2*BH*1*1#',
+    price: 50,
+    type: OfferType.DATA,
+  },
+  {
+    name: '350 MBS - 7 Days',
+    ussdCode: '*180*5*2*BH*2*1#',
+    price: 49,
+    type: OfferType.DATA,
+  },
+  {
+    name: '2.5GB - 7 Days',
+    ussdCode: '*180*5*2*BH*3*1#',
+    price: 300,
+    type: OfferType.DATA,
+  },
+  {
+    name: '6GB - 7 Days',
+    ussdCode: '*180*5*2*BH*4*1#',
+    price: 700,
+    type: OfferType.DATA,
+  },
+  {
+    name: '1GB - 1Hr',
+    ussdCode: '*180*5*2*BH*5*1#',
+    price: 19,
+    type: OfferType.DATA,
+  },
+  {
+    name: '250MBS - 24 Hrs',
+    ussdCode: '*180*5*2*BH*6*1#',
+    price: 20,
+    type: OfferType.DATA,
+  },
+  {
+    name: '1GB - 24 Hrs',
+    ussdCode: '*180*5*2*BH*7*1#',
+    price: 99,
+    type: OfferType.DATA,
+  },
+  {
+    name: '1.25GB - Until Midnight',
+    ussdCode: '*180*5*2*BH*8*1#',
+    price: 55,
+    type: OfferType.DATA,
+  },
 ];
 
 /**

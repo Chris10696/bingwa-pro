@@ -2,7 +2,14 @@
 // W2.B/E: phoneNumber validator relaxed from @IsPhoneNumber('KE') to @IsString()
 // — WalletsService now passes Daraja's 2547######## form, which @IsPhoneNumber
 // rejects. The global ValidationPipe (W2.E) would otherwise 400 the request.
-import { IsString, IsNumber, IsOptional, Min, Max, IsEnum } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  Min,
+  Max,
+  IsEnum,
+} from 'class-validator';
 
 export enum MpesaEnvironment {
   SANDBOX = 'sandbox',

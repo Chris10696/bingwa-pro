@@ -1,4 +1,11 @@
-import { IsString, IsOptional, IsEnum, IsNumber, IsUUID, IsObject } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsNumber,
+  IsUUID,
+  IsObject,
+} from 'class-validator';
 
 export enum UssdAction {
   INITIATE = 'initiate',

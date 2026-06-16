@@ -1,4 +1,12 @@
-import { IsString, IsEnum, IsArray, IsOptional, IsNumber, IsObject, ValidateNested } from 'class-validator';
+import {
+  IsString,
+  IsEnum,
+  IsArray,
+  IsOptional,
+  IsNumber,
+  IsObject,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { UssdProcessingMode } from '../entities/ussd-route.entity';
 

@@ -1,14 +1,14 @@
 // bingwa-pro-backend/src/ussd/ussd.controller.ts
-import { 
-  Controller, 
-  Get, 
-  Post, 
-  Put, 
-  Patch, 
-  Delete, 
-  Body, 
-  Param, 
-  Query, 
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -26,7 +26,7 @@ export class UssdController {
   constructor(private readonly ussdService: UssdService) {}
 
   // ========== AFRICA'S TALKING CALLBACK (PUBLIC ENDPOINT) ==========
-  
+
   /**
    * This endpoint receives POST requests from Africa's Talking USSD gateway
    * Must be public (no auth) as Africa's Talking calls it
@@ -36,9 +36,9 @@ export class UssdController {
   async handleUssdCallback(@Req() req: any, @Res() res: any) {
     // Africa's Talking sends data as application/x-www-form-urlencoded
     const body = req.body;
-    
+
     const response = await this.ussdService.handleAfricaTalkingCallback(body);
-    
+
     // Return response in the format Africa's Talking expects (plain text)
     res.set('Content-Type', 'text/plain');
     res.send(response);
@@ -71,7 +71,10 @@ export class UssdController {
     @Query('agentId') agentId?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.ussdService.getSessionHistory(agentId, limit ? parseInt(limit) : 50);
+    return this.ussdService.getSessionHistory(
+      agentId,
+      limit ? parseInt(limit) : 50,
+    );
   }
 
   // ========== ANOMALY MANAGEMENT ==========

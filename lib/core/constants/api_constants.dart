@@ -4,7 +4,7 @@
 class ApiConstants {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://observant-smile-production-a472.up.railway.app/',
+    defaultValue: 'https://bingwa-pro-backend-production.up.railway.app',
   );
 
   // Auth

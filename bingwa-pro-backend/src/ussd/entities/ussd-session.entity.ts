@@ -1,5 +1,13 @@
 // bingwa-pro-backend/src/ussd/entities/ussd-session.entity.ts
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  Column,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
 import { UssdRoute } from './ussd-route.entity';
 import { Agent } from '../../agents/entities/agent.entity';
 

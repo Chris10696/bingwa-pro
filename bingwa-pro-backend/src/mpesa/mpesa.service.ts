@@ -12,6 +12,7 @@ import {
   HttpException,
   HttpStatus,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -97,13 +98,14 @@ export class MpesaService {
         BusinessShortCode: this.config.businessShortCode,
         Password: password,
         Timestamp: timestamp,
-        TransactionType: 'CustomerPayBillOnline',
+        TransactionType: this.config.transactionType,
         Amount: requestDto.amount,
         PartyA: requestDto.phoneNumber,
-        PartyB: this.config.businessShortCode,
+        PartyB: this.config.partyB,
         PhoneNumber: requestDto.phoneNumber,
         CallBackURL: this.config.callbackUrl,
-        AccountReference: requestDto.accountReference || `AGENT${agentId || '000'}`,
+        AccountReference:
+          requestDto.accountReference || `AGENT${agentId || '000'}`,
         TransactionDesc: requestDto.transactionDesc || 'Subscription Purchase',
       };
       this.logger.log(
@@ -255,9 +257,10 @@ export class MpesaService {
   private async grantSubscriptionForTransaction(
     transaction: MpesaTransaction,
   ): Promise<void> {
-    const purchase = await this.subscriptionPurchasesService.findByPaymentReference(
-      transaction.checkoutRequestId,
-    );
+    const purchase =
+      await this.subscriptionPurchasesService.findByPaymentReference(
+        transaction.checkoutRequestId,
+      );
     if (!purchase) {
       this.logger.warn(
         `No SubscriptionPurchase linked to checkoutRequestId=${transaction.checkoutRequestId}. ` +
@@ -286,9 +289,10 @@ export class MpesaService {
   private async markPurchaseFailed(
     transaction: MpesaTransaction,
   ): Promise<void> {
-    const purchase = await this.subscriptionPurchasesService.findByPaymentReference(
-      transaction.checkoutRequestId,
-    );
+    const purchase =
+      await this.subscriptionPurchasesService.findByPaymentReference(
+        transaction.checkoutRequestId,
+      );
     if (purchase && purchase.status === SubscriptionPurchaseStatus.PENDING) {
       await this.subscriptionPurchasesService.updateStatus(
         purchase.id,
@@ -344,6 +348,14 @@ export class MpesaService {
     transactionId: string,
     success: boolean = true,
   ): Promise<any> {
+    // PRODUCTION SAFETY: simulate grants a plan WITHOUT a real payment, so it
+    // must never be reachable in production (it would be a free-tokens backdoor
+    // for any logged-in agent). Sandbox/dev only.
+    if (this.config.environment === 'production') {
+      throw new ForbiddenException(
+        'Payment simulation is disabled in production.',
+      );
+    }
     const transaction = await this.mpesaTransactionRepository.findOne({
       where: { id: transactionId },
     });

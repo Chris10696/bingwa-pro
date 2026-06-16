@@ -48,7 +48,9 @@ export class CouponsService {
       throw new BadRequestException('Coupon has already been redeemed');
     }
 
-    const pkg = await this.subscriptionPackagesService.findOne(coupon.packageId);
+    const pkg = await this.subscriptionPackagesService.findOne(
+      coupon.packageId,
+    );
 
     // Mark coupon used first (single-use guard against concurrent redeems).
     coupon.usedAt = new Date();

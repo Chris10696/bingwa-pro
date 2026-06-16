@@ -10,12 +10,7 @@
 //
 // `safaricomReference` reconciles the entity's twin columns (safaricomRef
 // vs safaricomReference) — write both, read either; W6 picks one.
-import {
-  IsEnum,
-  IsOptional,
-  IsString,
-  MaxLength,
-} from 'class-validator';
+import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { TransactionStatus } from '../entities/transaction.entity';
 
 export class UpdateTransactionStatusDto {

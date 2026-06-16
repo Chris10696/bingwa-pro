@@ -13,9 +13,7 @@ export class SubscriptionPackagesController {
   @Get()
   @UseGuards(JwtAuthGuard)
   async findAll(@Query('includeInactive') includeInactive?: string) {
-    return this.subscriptionPackagesService.findAll(
-      includeInactive === 'true',
-    );
+    return this.subscriptionPackagesService.findAll(includeInactive === 'true');
   }
 
   @Get(':id')

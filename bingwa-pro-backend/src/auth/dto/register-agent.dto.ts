@@ -1,4 +1,11 @@
-import { IsString, IsEmail, IsNotEmpty, MinLength, Matches, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsEmail,
+  IsNotEmpty,
+  MinLength,
+  Matches,
+  IsOptional,
+} from 'class-validator';
 
 export class RegisterAgentDto {
   @IsString()
@@ -6,7 +13,10 @@ export class RegisterAgentDto {
   fullName: string;
 
   @IsString()
-  @Matches(/^07\d{8}$/, { message: 'Phone number must be a valid Safaricom number starting with 07 (e.g., 0712345678)' })
+  @Matches(/^07\d{8}$/, {
+    message:
+      'Phone number must be a valid Safaricom number starting with 07 (e.g., 0712345678)',
+  })
   phoneNumber: string;
 
   @IsString()

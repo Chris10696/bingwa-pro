@@ -67,8 +67,7 @@ export class SubscriptionPlansService {
 
     const limited = plans.find(
       (p) =>
-        p.type === SubscriptionType.LIMITED &&
-        (p.tokensRemaining ?? 0) > 0,
+        p.type === SubscriptionType.LIMITED && (p.tokensRemaining ?? 0) > 0,
     );
     if (!limited) {
       this.logger.warn(
@@ -119,7 +118,9 @@ export class SubscriptionPlansService {
       subscriptionPackageId: packageId,
       type: pkg.type,
       tokensRemaining:
-        pkg.type === SubscriptionType.LIMITED ? pkg.tokenAllowance ?? 0 : null,
+        pkg.type === SubscriptionType.LIMITED
+          ? (pkg.tokenAllowance ?? 0)
+          : null,
       expiresAt:
         pkg.type === SubscriptionType.UNLIMITED
           ? new Date(Date.now() + Number(pkg.durationMs ?? 0))

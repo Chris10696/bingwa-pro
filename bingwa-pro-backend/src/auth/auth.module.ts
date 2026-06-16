@@ -21,7 +21,8 @@ import { AgentsModule } from '../agents/agents.module';
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
-        secret: configService.get('JWT_SECRET') || 'your-secret-key-change-this',
+        secret:
+          configService.get('JWT_SECRET') || 'your-secret-key-change-this',
         signOptions: { expiresIn: '7d' },
       }),
     }),

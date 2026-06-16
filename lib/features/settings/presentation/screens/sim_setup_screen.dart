@@ -14,12 +14,29 @@
 // the dial / SMS-send / receive-gate paths. SIM labels come from the native getSimInfo
 // channel (active carrier display names); slots without an active SIM are shown disabled.
 //
-// State is read from native on entry: dial/reply via the two "via SIM2" booleans, receive
-// via the two receive booleans. (Single-SIM defaults: dial SIM1, reply SIM1, receive SIM1 on.)
+// BRING-UP HARDENING (SIM-not-detected):
+//   getActiveSubscriptionInfoList() needs READ_PHONE_STATE, and on Android 14 a missing grant
+//   returns an EMPTY LIST SILENTLY (no exception). The old screen never requested the
+//   permission and showed one ambiguous banner, so an agent had no in-app way to recover.
+//   Now the screen:
+//     • requests Phone permission on entry (real prompt, via permission_handler),
+//     • separates "permission denied" (Grant button) from "granted but no SIM" (insert-SIM note),
+//     • offers Open Settings on a permanent denial,
+//     • re-checks automatically when the app resumes (so a Settings grant clears it without
+//       leaving/re-entering) and via a manual refresh in the app bar.
+//   The native SimSubscriptionResolver is unchanged — disambiguation happens here.
+//
+// NOTE: requires the `permission_handler` package. If it isn't already a dependency, add it:
+//   flutter pub add permission_handler
+// READ_PHONE_STATE is already declared in AndroidManifest.xml, so no manifest change is needed.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/services/session_bridge_service.dart';
+
+/// Phone-permission state for the SIM-setup flow.
+enum _PermState { checking, granted, denied, permanentlyDenied }
 
 class SimSetupScreen extends ConsumerStatefulWidget {
   const SimSetupScreen({super.key});
@@ -28,7 +45,8 @@ class SimSetupScreen extends ConsumerStatefulWidget {
   ConsumerState<SimSetupScreen> createState() => _SimSetupScreenState();
 }
 
-class _SimSetupScreenState extends ConsumerState<SimSetupScreen> {
+class _SimSetupScreenState extends ConsumerState<SimSetupScreen>
+    with WidgetsBindingObserver {
   static const _green = Color(0xFF00C853);
 
   // Native getters live on the same session channel; the service exposes setters +
@@ -36,6 +54,9 @@ class _SimSetupScreenState extends ConsumerState<SimSetupScreen> {
   static const MethodChannel _channel = MethodChannel('bingwa_pro/session');
 
   bool _loading = true;
+
+  // Phone-permission state (drives whether we show the prompt or the SIM sections).
+  _PermState _perm = _PermState.checking;
 
   // Active SIM labels by slot (1-based). Absent slot → no active SIM.
   final Map<int, String> _simLabels = {};
@@ -55,10 +76,68 @@ class _SimSetupScreenState extends ConsumerState<SimSetupScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // If the agent left to grant the permission in Settings, re-check on return
+    // so the screen recovers without a manual leave/re-enter. We only re-check
+    // (never re-prompt) here to avoid a prompt loop on every resume.
+    if (state == AppLifecycleState.resumed && _perm != _PermState.granted) {
+      _recheckOnResume();
+    }
+  }
+
+  Future<void> _recheckOnResume() async {
+    final status = await Permission.phone.status;
+    if (!mounted) return;
+    if (status.isGranted) {
+      setState(() {
+        _perm = _PermState.granted;
+        _loading = true;
+      });
+      await _loadSimData();
+    } else {
+      setState(() {
+        _perm = status.isPermanentlyDenied
+            ? _PermState.permanentlyDenied
+            : _PermState.denied;
+      });
+    }
+  }
+
+  /// Entry / retry: ensure Phone permission, then load SIM data if granted.
   Future<void> _load() async {
+    var status = await Permission.phone.status;
+    // `denied` covers both "never asked" and "asked, can ask again" → prompt now.
+    if (status.isDenied) {
+      status = await Permission.phone.request();
+    }
+    if (!mounted) return;
+    if (status.isGranted) {
+      setState(() => _perm = _PermState.granted);
+      await _loadSimData();
+      return;
+    }
+    setState(() {
+      _perm = status.isPermanentlyDenied
+          ? _PermState.permanentlyDenied
+          : _PermState.denied;
+      _loading = false;
+    });
+  }
+
+  /// Reads active SIM labels + the stored SIM-routing booleans from native.
+  Future<void> _loadSimData() async {
+    _simLabels.clear();
     // SIM labels (best-effort).
     final sims = await _bridge.getSimInfo();
     for (final s in sims) {
@@ -72,6 +151,11 @@ class _SimSetupScreenState extends ConsumerState<SimSetupScreen> {
     _dialViaSim2 = await _getBool('getDialUssdViaSim2', false);
     _replyViaSim2 = await _getBool('getSendSmsViaSim2', false);
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _retry() async {
+    setState(() => _loading = true);
+    await _load();
   }
 
   Future<bool> _getBool(String method, bool fallback) async {
@@ -127,54 +211,129 @@ class _SimSetupScreenState extends ConsumerState<SimSetupScreen> {
         title: const Text('Sim Setup'),
         backgroundColor: _green,
         foregroundColor: Colors.white,
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: _green))
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (_simLabels.isEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.shade50,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.orange.shade200),
-                    ),
-                    child: const Text(
-                      'No active SIMs detected. Settings are saved but take effect '
-                      'once a SIM is present and phone permissions are granted.',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ),
-                _section(
-                  title: 'SIM to receive payments',
-                  children: [
-                    _simSwitchRow(1, _receiveSim1,
-                        (v) => _onReceiveChanged(1, v)),
-                    _simSwitchRow(2, _receiveSim2,
-                        (v) => _onReceiveChanged(2, v)),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                _section(
-                  title: 'Bingwa SIM (To run USSDs)',
-                  children: [
-                    _simRadioRow(1, !_dialViaSim2, () => _onDialSelected(1)),
-                    _simRadioRow(2, _dialViaSim2, () => _onDialSelected(2)),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                _section(
-                  title: 'Send Auto-Replies Using',
-                  children: [
-                    _simRadioRow(1, !_replyViaSim2, () => _onReplySelected(1)),
-                    _simRadioRow(2, _replyViaSim2, () => _onReplySelected(2)),
-                  ],
-                ),
-              ],
+        actions: [
+          if (!_loading && _perm == _PermState.granted)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Re-check SIMs',
+              onPressed: _retry,
             ),
+        ],
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(color: _green));
+    }
+    if (_perm == _PermState.denied || _perm == _PermState.permanentlyDenied) {
+      return _permissionPrompt();
+    }
+    // Permission granted → show the sections (with a no-SIM note if applicable).
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        if (_simLabels.isEmpty) _noSimCard(),
+        _section(
+          title: 'SIM to receive payments',
+          children: [
+            _simSwitchRow(1, _receiveSim1, (v) => _onReceiveChanged(1, v)),
+            _simSwitchRow(2, _receiveSim2, (v) => _onReceiveChanged(2, v)),
+          ],
+        ),
+        const SizedBox(height: 24),
+        _section(
+          title: 'Bingwa SIM (To run USSDs)',
+          children: [
+            _simRadioRow(1, !_dialViaSim2, () => _onDialSelected(1)),
+            _simRadioRow(2, _dialViaSim2, () => _onDialSelected(2)),
+          ],
+        ),
+        const SizedBox(height: 24),
+        _section(
+          title: 'Send Auto-Replies Using',
+          children: [
+            _simRadioRow(1, !_replyViaSim2, () => _onReplySelected(1)),
+            _simRadioRow(2, _replyViaSim2, () => _onReplySelected(2)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // Shown when Phone permission is denied / permanently denied.
+  Widget _permissionPrompt() {
+    final permanent = _perm == _PermState.permanentlyDenied;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.sim_card_alert_outlined,
+                size: 64, color: Colors.orange.shade400),
+            const SizedBox(height: 16),
+            const Text(
+              'Phone permission needed',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              permanent
+                  ? 'Bingwa Pro needs the Phone permission to detect your SIM '
+                      'cards. It looks like it was denied — please enable it in '
+                      'Settings, then come back to this screen.'
+                  : 'Bingwa Pro needs the Phone permission to detect your SIM '
+                      'cards and choose which SIM dials USSDs and sends replies.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, color: Colors.black54),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: permanent ? () => openAppSettings() : _retry,
+                icon: Icon(permanent ? Icons.settings : Icons.lock_open),
+                label: Text(permanent ? 'Open Settings' : 'Grant Permission'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Shown when permission IS granted but the platform reports no active SIM.
+  Widget _noSimCard() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orange.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, color: Colors.orange.shade700, size: 20),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'No active SIM detected. Insert a SIM card to choose your dialing '
+              'and reply SIMs, then tap refresh. (An eSIM-only or unregistered '
+              'SIM may not be reported by the system.)',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

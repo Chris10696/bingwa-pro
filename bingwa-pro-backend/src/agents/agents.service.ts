@@ -1,10 +1,7 @@
 // bingwa-pro-backend/src/agents/agents.service.ts
 // W1 ripple edit: getProfile() drops tokenBalance (wallet no longer has it).
 // All other methods preserved verbatim.
-import {
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Agent, AgentStatus } from './entities/agent.entity';

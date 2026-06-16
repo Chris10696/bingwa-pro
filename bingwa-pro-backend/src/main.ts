@@ -27,7 +27,9 @@ async function bootstrap() {
   const wifiIp = '192.168.100.8';
   console.log(`🚀 Backend running at:`);
   console.log(`   - Local: http://localhost:${port}`);
-  console.log(`   - Wi-Fi Network: http://${wifiIp}:${port} (USE THIS FOR PHONE)`);
+  console.log(
+    `   - Wi-Fi Network: http://${wifiIp}:${port} (USE THIS FOR PHONE)`,
+  );
 
   const { networkInterfaces } = require('os');
   const nets = networkInterfaces();
