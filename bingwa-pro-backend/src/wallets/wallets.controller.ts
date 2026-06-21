@@ -73,4 +73,24 @@ export class WalletsController {
       body.processingMode,
     );
   }
+
+  // GET /wallet/admin-subscription-number
+  @Get('admin-subscription-number')
+  @UseGuards(JwtAuthGuard)
+  getAdminSubscriptionNumber() {
+    return this.walletsService.getAdminSubscriptionNumber();
+  }
+
+  // POST /wallet/purchase-subscription-airtime  { "packageId": "..." }
+  @Post('purchase-subscription-airtime')
+  @UseGuards(JwtAuthGuard)
+  purchaseSubscriptionWithAirtime(
+    @Request() req,
+    @Body() body: { packageId: string },
+  ) {
+    return this.walletsService.purchaseSubscriptionWithAirtime(
+      req.user.sub,
+      body.packageId,
+    );
+  }
 }

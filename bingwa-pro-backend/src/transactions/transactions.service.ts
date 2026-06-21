@@ -49,6 +49,7 @@ import { Agent } from '../agents/entities/agent.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { Offer } from '../offers/entities/offer.entity';
 import { SubscriptionPlansService } from '../subscriptions/subscription-plans.service';
+import { SubscriptionPackagesService } from '../subscriptions/subscription-packages.service';
 // Terminal statuses — set completedAt when transitioning to one of these.
 const TERMINAL_STATUSES: ReadonlySet<TransactionStatus> = new Set([
   TransactionStatus.SUCCESS,
@@ -81,6 +82,7 @@ export class TransactionsService {
     @InjectRepository(Offer)
     private offersRepository: Repository<Offer>,
     private subscriptionPlansService: SubscriptionPlansService,
+    private subscriptionPackagesService: SubscriptionPackagesService,
   ) {}
   async getTransactionHistory(
     agentId: string,
@@ -231,6 +233,47 @@ export class TransactionsService {
     }
     this.logger.log(
       `QUICK_DIAL SCHEDULED — agent=${agentId} offer=${offer.name} txn=${saved.id} debited=${debited}`,
+    );
+    return saved;
+  }
+
+  /**
+   * Pay-with-airtime (Sambaza) — Hybrid parity (payWithAirtime). Creates a
+   * SUBSCRIPTION_RENEWAL transaction whose ussdCode is the Sambaza transfer
+   * *140*<price>*<adminNumber># (built server-side so the admin number never
+   * reaches the device). The device dials it through the SAME pipeline as every
+   * other dial; the plan is granted after a successful dial.
+   *
+   * UNLIKE createQuickDial: NO 402-guard and NO token debit — the agent is
+   * BUYING tokens, not spending one (Hybrid's payWithAirtime never debits).
+   */
+  async createAirtimeSubscription(
+    agentId: string,
+    packageId: string,
+  ): Promise<Transaction> {
+    const pkg = await this.subscriptionPackagesService.findOne(packageId);
+    const adminNumber = process.env.ADMIN_SUBSCRIPTION_NUMBER?.trim();
+    if (!adminNumber) {
+      throw new HttpException(
+        'Airtime payment is not configured. Please use M-Pesa.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    const ussdCode = `*140*${pkg.price}*${adminNumber}#`;
+    const reference = `AIR${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const transaction = this.transactionsRepository.create({
+      agentId,
+      reference,
+      type: TransactionType.SUBSCRIPTION_RENEWAL,
+      status: TransactionStatus.SCHEDULED,
+      amount: pkg.price,
+      customerPhone: adminNumber, // audit only; device passes '' to suppress auto-reply
+      ussdCode,
+      metadata: { airtimeSubscription: true, packageId },
+    });
+    const saved = await this.transactionsRepository.save(transaction);
+    this.logger.log(
+      `AIRTIME SUBSCRIPTION SCHEDULED — agent=${agentId} package=${pkg.name} txn=${saved.id}`,
     );
     return saved;
   }

@@ -4,11 +4,11 @@
 //   - recordTransaction(): productId/productName → offerId/offerName per Q1
 //     (keep with rename only; scaffolding values preserved with TODO markers)
 // All other methods preserved verbatim.
+import 'package:bingwa_nexus/core/utils/logger.dart';
+import 'package:bingwa_nexus/shared/models/transaction_model.dart';
+import 'package:bingwa_nexus/shared/repositories/transaction_repository.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:bingwa_pro/shared/models/transaction_model.dart';
-import 'package:bingwa_pro/shared/repositories/transaction_repository.dart';
-import 'package:bingwa_pro/core/utils/logger.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../../core/security/device_fingerprint.dart';
 

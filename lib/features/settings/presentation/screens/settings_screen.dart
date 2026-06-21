@@ -1,6 +1,6 @@
 // lib/features/settings/presentation/screens/settings_screen.dart
-import 'package:bingwa_pro/features/auth/presentation/providers/auth_provider.dart';
-import 'package:bingwa_pro/shared/models/auth_model.dart';
+import 'package:bingwa_nexus/features/auth/presentation/providers/auth_provider.dart';
+import 'package:bingwa_nexus/shared/models/auth_model.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';

@@ -29,7 +29,7 @@ class UssdEngine(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     // ── W3.B: data-driven offer formatting (Hybrid FormatUssdUseCase parity) ──
-    // Scheduled/quick-dial offers store a template using the "BH" placeholder for
+    // Scheduled/quick-dial offers store a template using the "BH"/"BN" placeholder for
     // the customer phone and "AMT" for the amount (Safaricom codes are digits/*/#
     // only, so these letter tokens are unambiguous). This mirrors the Dart
     // ussd_template_formatter so device-side dials (scheduled renewals) format the
@@ -40,7 +40,12 @@ class UssdEngine(
         return "0$last9"
     }
     fun formatUssdCode(template: String, customerPhone: String, amount: Int? = null): String {
-        var code = template.replace("BH", normalizeKenyanPhone(customerPhone))
+        val phone = normalizeKenyanPhone(customerPhone)
+        // Accept BOTH the legacy "BH" and the rebranded "BN" placeholder so existing
+        // (BH) templates keep dialing during/after the rebrand migration. Both are
+        // digit-free letter tokens and the customer phone is digits-only, so replacing
+        // one can never disturb the other.
+        var code = template.replace("BH", phone).replace("BN", phone)
         if (amount != null) code = code.replace("AMT", amount.toString())
         if (!code.endsWith("#")) code += "#"
         return code

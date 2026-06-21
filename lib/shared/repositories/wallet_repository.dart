@@ -8,6 +8,7 @@
 //           initiateAirtimePayment, checkTransactionStatus, cancelTransaction,
 //           getTransactionReceipt, checkForPayments, deductTokens,
 //           updatePaymentSettings
+//   + Pay-with-airtime: getAdminSubscriptionNumber, purchaseSubscriptionWithAirtime
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/network/dio_client.dart';
@@ -285,6 +286,64 @@ class WalletRepository {
         .replaceFirst('{checkoutRequestId}', checkoutRequestId);
     final response = await _dio.get(url);
     return response.data as Map<String, dynamic>;
+  }
+
+  // ── Pay-with-airtime (Sambaza) ──────────────────────────────────────────────
+  /// GET /wallet/admin-subscription-number — the app owner's collection number
+  /// that agents Sambaza airtime to. Returns '' if the server didn't provide one.
+  Future<String> getAdminSubscriptionNumber() async {
+    try {
+      AppLogger.logNetworkRequest(
+        method: 'GET',
+        url: ApiConstants.adminSubscriptionNumber,
+      );
+      final response = await _dio.get(ApiConstants.adminSubscriptionNumber);
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: ApiConstants.adminSubscriptionNumber,
+        data: response.data,
+      );
+      final data = response.data as Map<String, dynamic>;
+      return (data['adminNumber'] ?? '').toString();
+    } on DioException catch (e) {
+      AppLogger.e('Get admin subscription number failed:', e);
+      rethrow;
+    } catch (e) {
+      AppLogger.e('Get admin subscription number error:', e);
+      rethrow;
+    }
+  }
+
+  /// POST /wallet/purchase-subscription-airtime — grants the plan after the agent
+  /// has Sambaza'd airtime to the admin number. Returns the grant payload
+  /// { packageName, amount, reference, plan, balance }.
+  Future<Map<String, dynamic>> purchaseSubscriptionWithAirtime(
+    String packageId,
+  ) async {
+    try {
+      final body = {'packageId': packageId};
+      AppLogger.logNetworkRequest(
+        method: 'POST',
+        url: ApiConstants.purchaseSubscriptionAirtime,
+        data: body,
+      );
+      final response = await _dio.post(
+        ApiConstants.purchaseSubscriptionAirtime,
+        data: body,
+      );
+      AppLogger.logNetworkResponse(
+        statusCode: response.statusCode!,
+        url: ApiConstants.purchaseSubscriptionAirtime,
+        data: response.data,
+      );
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      AppLogger.e('Airtime subscription failed:', e);
+      rethrow;
+    } catch (e) {
+      AppLogger.e('Airtime subscription error:', e);
+      rethrow;
+    }
   }
 }
 

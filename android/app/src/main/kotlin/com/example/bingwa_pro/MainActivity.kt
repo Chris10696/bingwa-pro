@@ -54,6 +54,7 @@ class MainActivity : FlutterActivity() {
         AutoReplyTemplates.seedIfNeeded(applicationContext) // W3.M: seed default auto-replies
         requestAllPermissions()
         requestBatteryOptimizationExemption()
+        requestOverlayPermission()
         startUssdService()
     }
 
@@ -483,6 +484,30 @@ class MainActivity : FlutterActivity() {
             startActivity(intent)
         } catch (e: ActivityNotFoundException) {
             Log.w(TAG, "Battery optimization settings not available on this device", e)
+        }
+    }
+
+    /**
+     * W3.D bring-up: SYSTEM_ALERT_WINDOW ("Display over other apps") is the documented
+     * background-activity-start exemption that lets an SMS-triggered dial launch the
+     * system dialer (ACTION_CALL) while the app is backgrounded — the same exemption
+     * Hybrid declares. The Intent opens system settings; the user taps "Allow". Safe to
+     * call repeatedly — returns immediately once granted.
+     */
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        if (Settings.canDrawOverlays(this)) {
+            Log.d(TAG, "Overlay (SYSTEM_ALERT_WINDOW) already granted")
+            return
+        }
+        try {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "Overlay permission settings not available on this device", e)
         }
     }
 

@@ -19,9 +19,10 @@
 //   - Processing badge shows today's real processed count from backend stats
 //     instead of the inert in-memory counter
 import 'dart:async';
-import 'package:bingwa_pro/features/dashboard/presentation/providers/processing_provider.dart';
-import 'package:bingwa_pro/features/transactions/presentation/providers/transaction_provider.dart';
-import 'package:bingwa_pro/features/wallet/presentation/providers/wallet_provider.dart';
+import 'package:bingwa_nexus/features/auth/presentation/providers/auth_provider.dart';
+import 'package:bingwa_nexus/features/dashboard/presentation/providers/processing_provider.dart';
+import 'package:bingwa_nexus/features/transactions/presentation/providers/transaction_provider.dart';
+import 'package:bingwa_nexus/features/wallet/presentation/providers/wallet_provider.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,7 +37,6 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../core/security/secure_storage_manager.dart';
 import '../providers/dashboard_provider.dart';
-import 'package:bingwa_pro/features/auth/presentation/providers/auth_provider.dart';
 import '../providers/airtime_provider.dart';
 import '../../../../shared/models/transaction_model.dart';
 import '../../../../shared/models/subscription_plan_model.dart';

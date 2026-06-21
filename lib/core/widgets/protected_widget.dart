@@ -1,4 +1,5 @@
-import 'package:bingwa_pro/core/widgets/loading_indicator.dart';
+import 'package:bingwa_nexus/core/widgets/loading_indicator.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:local_auth/local_auth.dart';

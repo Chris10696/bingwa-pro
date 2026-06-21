@@ -16,6 +16,7 @@ import '../../../../shared/models/wallet_model.dart';
 import '../../../../shared/models/subscription_package_model.dart';
 import '../../../../shared/models/subscription_plan_model.dart';
 import '../providers/wallet_provider.dart';
+import '../widgets/pay_with_airtime_sheet.dart';
 
 class WalletScreen extends ConsumerStatefulWidget {
   const WalletScreen({super.key});
@@ -352,6 +353,20 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       );
     }
 
+    void _openAirtimeSheet(WalletState state) async {
+    SubscriptionPackage? pkg;
+    for (final p in state.packages) {
+      if (p.id == state.selectedPackageId) {
+        pkg = p;
+        break;
+      }
+    }
+    if (pkg == null) return;
+    await PayWithAirtimeSheet.show(context, pkg);
+    // The sheet refreshes the wallet itself on a successful grant; nothing else
+    // needed here. (state.packages / SubscriptionPackage are already imported.)
+  }
+
     if (state.pollStatus == StkPollStatus.failed) {
       return _waitPanel(
         message: 'Payment was not successful. Please try again.',
@@ -398,35 +413,62 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
       );
     }
 
-    // idle / success → show the Subscribe button.
+    // idle / success → show the Subscribe (M-Pesa) + Pay-with-Airtime buttons.
     final hasSelection = state.selectedPackageId != null;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: SizedBox(
-        width: double.infinity,
-        height: 50,
-        child: ElevatedButton(
-          onPressed: hasSelection
-              ? () => notifier.subscribeAndPoll(
-                    packageId: state.selectedPackageId!,
-                  )
-              : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00C853),
-            disabledBackgroundColor: Colors.grey.shade300,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+      child: Column(
+        children: [
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              onPressed: hasSelection
+                  ? () => notifier.subscribeAndPoll(
+                        packageId: state.selectedPackageId!,
+                      )
+                  : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00C853),
+                disabledBackgroundColor: Colors.grey.shade300,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text(
+                'PAY WITH M-PESA',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
             ),
           ),
-          child: const Text(
-            'SUBSCRIBE',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton.icon(
+              onPressed: hasSelection ? () => _openAirtimeSheet(state) : null,
+              icon: const Icon(Icons.phone_android, color: Color(0xFF00C853)),
+              label: const Text(
+                'PAY WITH AIRTIME',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF00C853),
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFF00C853)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

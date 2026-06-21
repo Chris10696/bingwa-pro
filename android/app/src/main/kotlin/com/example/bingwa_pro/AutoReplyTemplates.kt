@@ -15,7 +15,8 @@ import android.util.Log
  * sender reads them at send time. When W4 adds the edit-UI, it writes the same keys.
  *
  * The SUCCESS template is the ONLY change from Hybrid's literals: "Bingwa Hybrid" →
- * "Bingwa Pro" (rebrand). Everything else is byte-for-byte.
+ * "Bingwa Nexus" (client rebrand). Everything else is byte-for-byte. KEY_SEEDED is
+ * bumped (v2) to re-seed the new brand over an install that already seeded the old text.
  *
  * Placeholder substitution mirrors AutoReplyPlaceHolder.replacePlaceholders exactly:
  *   <firstName>  first token of the customer name (split on " "), else ""
@@ -31,7 +32,7 @@ import android.util.Log
 object AutoReplyTemplates {
     private const val TAG = "AutoReplyTemplates"
     private const val PREFS = "bingwa_auto_replies"
-    private const val KEY_SEEDED = "seeded_v1"
+    private const val KEY_SEEDED = "seeded_v2"
 
     // AutoReplyType (Hybrid verbatim ordinals): SUCCESS=0, FAILED=1, OFFER_UNAVAILABLE=2,
     // ALREADY_RECOMMENDED=3, APP_PAUSED=4, CUSTOMER_BLOCKED=5.
@@ -40,7 +41,7 @@ object AutoReplyTemplates {
     // The six verbatim Hybrid seed messages (SUCCESS rebranded Hybrid→Pro).
     private val DEFAULTS: Map<AutoReplyType, String> = mapOf(
         AutoReplyType.SUCCESS to
-            "Hi <firstName>, Thank you for purchasing from Bingwa Pro",
+            "Hi <firstName>, Thank you for purchasing from Bingwa Nexus",
         AutoReplyType.ALREADY_RECOMMENDED to
             "Hello <firstName>, you have already purchased this offer today. Please try again tomorrow",
         AutoReplyType.FAILED to

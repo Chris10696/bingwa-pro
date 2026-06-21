@@ -13,21 +13,24 @@ import kotlinx.coroutines.withContext
  * response. So this is now a thin parser over UssdEngine.dialExpressCapturing
  * (the W3.B capturing dial), replacing the old hardcoded 100.0.
  *
- * NOTE: the exact Safaricom *144# response wording isn't in the spec, so the parse
- * below is deliberately tolerant. It is one of the explicitly-deferred live tests —
- * tune `balancePattern` against a real device response (watch adb logcat for the
- * "Airtime *144# response" line).
+ * The balance is extracted with Hybrid's exact regex ("Airtime Bal: <n>KSH"), ported
+ * verbatim from BalanceRepositoryImpl. If a value still looks wrong on a given line,
+ * capture the raw reply (this logs "Airtime *144# response: ..." to logcat) — any
+ * remaining gap is then in Safaricom's wording, not the parse.
  */
 class AirtimeChecker(private val context: Context) {
     private val TAG = "AirtimeChecker"
     private var currentBalance: Double? = null
     private var isChecking = false
 
-    // Tolerant: matches "...Ksh 123.45..." / "...KES 123..." / "balance is 123.45".
-    private val balancePattern = Regex(
-        """(?:Ksh|KES|balance(?:\s+is)?)[^\d-]*([\d,]+(?:\.\d+)?)""",
-        RegexOption.IGNORE_CASE
-    )
+    // Verbatim port of Hybrid's BalanceRepositoryImpl.extractAirtimeBalance:
+    //     Regex("Airtime Bal:\\s*([0-9]+\\.?[0-9]*)KSH")
+    // Anchored on Safaricom's exact "Airtime Bal: <n>KSH" line, so a multi-line *144#
+    // reply (Okoa Jahazi advance, Bonga points, promos) can't make the parse grab the
+    // wrong figure. The previous loose pattern matched the FIRST money-number anywhere,
+    // which surfaced the Okoa/promo amount (e.g. 23.00) or, on a layout it didn't match,
+    // nothing → 0.00. Case-sensitive, to match Hybrid exactly.
+    private val balancePattern = Regex("""Airtime Bal:\s*([0-9]+\.?[0-9]*)KSH""")
 
     suspend fun getAirtimeBalance(): Double = withContext(Dispatchers.IO) {
         if (isChecking) {

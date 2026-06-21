@@ -228,6 +228,19 @@ class TransactionRepository {
     return response;
   }
 
+  // Pay-with-airtime: POST /transactions/airtime-subscription. Creates the
+  // SUBSCRIPTION_RENEWAL Sambaza transaction (no token debit). validateStatus<500,
+  // so a non-2xx resolves — caller inspects statusCode.
+  Future<Response> createAirtimeSubscription({required String packageId}) async {
+    final body = {'packageId': packageId};
+    final url = '${ApiConstants.transactions}/airtime-subscription';
+    AppLogger.logNetworkRequest(method: 'POST', url: url, data: body);
+    final response = await _dio.post(url, data: body);
+    AppLogger.logNetworkResponse(
+        statusCode: response.statusCode ?? 0, url: url, data: response.data);
+    return response;
+  }
+
   // W2.F: GET /transactions/scheduled. amount is a Postgres decimal → arrives
   // as either a number (50) or a string ("49.00"); parse tolerantly.
   Future<List<ScheduledTransaction>> getScheduled() async {

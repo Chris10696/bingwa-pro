@@ -61,4 +61,9 @@ class ApiConstants {
   // System
   static const String systemStatus = '/system/status';
   static const String maintenance = '/system/maintenance';
+
+  static const String adminSubscriptionNumber =
+    '$baseUrl/wallet/admin-subscription-number';
+  static const String purchaseSubscriptionAirtime =
+    '$baseUrl/wallet/purchase-subscription-airtime';
 }

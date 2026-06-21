@@ -1,4 +1,4 @@
-import 'package:bingwa_pro/shared/models/customer_model.dart';
+import 'package:bingwa_nexus/shared/models/customer_model.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';

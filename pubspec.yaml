@@ -1,5 +1,5 @@
-name: bingwa_pro
-description: Bingwa Pro - Safaricom Agent Platform
+name: bingwa_nexus
+description: Bingwa Nexus - Safaricom Agent Platform
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -68,7 +68,6 @@ flutter:
   assets:
     - assets/images/
     - assets/animations/
-    - assets/icons/
     - .env
 
 flutter_launcher_icons:

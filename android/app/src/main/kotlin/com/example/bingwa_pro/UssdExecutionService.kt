@@ -4,6 +4,7 @@ package com.example.bingwa_pro
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -493,27 +494,51 @@ class UssdExecutionService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // IMPORTANCE_HIGH is required for the full-screen intent (background dial
+            // launch fallback) to be allowed to fire. Kept SILENT — no sound, no
+            // vibration — so it doesn't chime on every dial; SYSTEM_ALERT_WINDOW is the
+            // primary background-activity-start exemption, this is the fallback surface.
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Bingwa Pro USSD Service",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Processes scheduled USSD transactions"
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
         }
     }
 
-    private fun createNotification(): Notification =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun createNotification(): Notification {
+        // W3.D bring-up: a full-screen intent lets this foreground-service notification
+        // surface the call UI from the background, so an SMS-triggered ACTION_CALL isn't
+        // suppressed by Android 14's background-activity-start restriction. This is the
+        // FALLBACK path; the primary exemption is the SYSTEM_ALERT_WINDOW grant requested
+        // in MainActivity. The intent re-surfaces the app (single-top) — harmless if the
+        // dialer already came forward via the overlay exemption.
+        val launch = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        val piFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val fullScreen = PendingIntent.getActivity(this, 0, launch, piFlags)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Bingwa Pro")
             .setContentText("Processing transactions...")
             .setSmallIcon(android.R.drawable.ic_menu_edit)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
+            .setFullScreenIntent(fullScreen, true)
             .build()
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 

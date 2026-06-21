@@ -1,9 +1,9 @@
+import 'package:bingwa_nexus/core/widgets/custom_app_bar.dart';
+import 'package:bingwa_nexus/core/widgets/loading_indicator.dart';
+import 'package:bingwa_nexus/features/transactions/presentation/providers/transaction_provider.dart';
+import 'package:bingwa_nexus/shared/models/transaction_model.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:bingwa_pro/core/widgets/custom_app_bar.dart';
-import 'package:bingwa_pro/core/widgets/loading_indicator.dart';
-import 'package:bingwa_pro/features/transactions/presentation/providers/transaction_provider.dart';
-import 'package:bingwa_pro/shared/models/transaction_model.dart';
 import 'package:go_router/go_router.dart';
 
 class TransactionHistoryScreen extends ConsumerStatefulWidget {

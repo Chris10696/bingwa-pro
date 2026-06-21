@@ -1,5 +1,6 @@
-import 'package:bingwa_pro/shared/models/auth_model.dart';
-import 'package:bingwa_pro/shared/models/agent_model.dart';
+import 'package:bingwa_nexus/shared/models/agent_model.dart';
+import 'package:bingwa_nexus/shared/models/auth_model.dart';
+
 
 class AgentMapper {
   // Convert auth AgentProfile to detailed AgentDetailedProfile

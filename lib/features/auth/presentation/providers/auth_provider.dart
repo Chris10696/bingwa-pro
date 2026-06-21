@@ -1,5 +1,5 @@
-// lib/features/auth/presentation/providers/auth_provider.dart
-import 'package:bingwa_pro/core/utils/logger.dart';
+// lib/features/auth/
+import 'package:bingwa_nexus/core/utils/logger.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:formz/formz.dart' show FormzInput, FormzSubmissionStatus, FormzSubmissionStatusX;
 import '../../../../shared/models/auth_model.dart';

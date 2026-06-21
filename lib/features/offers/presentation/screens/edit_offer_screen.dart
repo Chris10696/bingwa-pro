@@ -248,15 +248,17 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
     );
   }
 
-  // Mirrors backend @Matches(/^\*[\d*]+BH[\d*]*#$/): starts *, ends #, has BH.
+  // Mirrors backend @Matches(/^\*[\d*]+(BH|BN)[\d*]*#$/): starts *, ends #, has the
+  // phone placeholder. Accepts BOTH the legacy "BH" and the rebranded "BN" token — keep
+  // the backend validator on the SAME dual-token regex so the two stay in lockstep.
   String? _validateUssd(String? v) {
     final code = v?.trim() ?? '';
     if (code.isEmpty) return 'USSD code is required';
     if (!code.startsWith('*') || !code.endsWith('#')) {
       return 'Must start with * and end with #';
     }
-    if (!code.contains('BH')) {
-      return 'Must contain the BH placeholder (customer phone)';
+    if (!code.contains('BN') && !code.contains('BH')) {
+      return 'Must contain the BN placeholder (customer phone)';
     }
     return null;
   }

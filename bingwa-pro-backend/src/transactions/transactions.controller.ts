@@ -72,6 +72,19 @@ export class TransactionsController {
     return this.transactionsService.createFromSms(req.user.sub, body);
   }
 
+  // POST /transactions/airtime-subscription  { "packageId": "..." }
+  @Post('airtime-subscription')
+  @UseGuards(JwtAuthGuard)
+  async createAirtimeSubscription(
+    @Request() req,
+    @Body() body: { packageId: string },
+  ) {
+    return this.transactionsService.createAirtimeSubscription(
+      req.user.sub,
+      body.packageId,
+    );
+  }
+
   // ===== W2.F scheduled (auto-renewals) — BEFORE /:id =====
   @Get('scheduled')
   @UseGuards(JwtAuthGuard)
@@ -188,6 +201,7 @@ export class TransactionsController {
       status: transaction.status,
       reference: transaction.reference,
       errorMessage: transaction.errorMessage,
+      ussdResponse: transaction.ussdResponse,
     };
   }
 

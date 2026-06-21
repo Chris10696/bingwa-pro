@@ -4,6 +4,11 @@
 // CheckoutRequestID. It records the purchase as PENDING; the plan is granted
 // later by MpesaService's callback/simulate grant path (NOT here — single
 // grant path). confirmPayment is now real. Added setProcessingMode (Q-W2-21).
+//
+// + Pay-with-airtime (Sambaza): getAdminSubscriptionNumber returns the app
+//   owner's collection number; purchaseSubscriptionWithAirtime grants a plan
+//   AFTER the app confirms a successful Sambaza, reusing the SAME single grant
+//   path (createPlanFromPurchase) the M-Pesa callback uses.
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -18,7 +23,6 @@ import { MpesaService } from '../mpesa/mpesa.service';
 @Injectable()
 export class WalletsService {
   private readonly logger = new Logger(WalletsService.name);
-
   constructor(
     @InjectRepository(Wallet)
     private walletsRepository: Repository<Wallet>,
@@ -92,7 +96,6 @@ export class WalletsService {
     phoneNumber?: string,
   ) {
     const pkg = await this.subscriptionPackagesService.findOne(packageId);
-
     let stkPhone = phoneNumber;
     if (!stkPhone) {
       const agent = await this.agentsRepository.findOne({
@@ -103,10 +106,8 @@ export class WalletsService {
     if (!stkPhone) {
       throw new NotFoundException('No phone number available for STK push');
     }
-
     // Daraja wants 2547######## (12-digit, no leading +). Convert 07######## .
     const darajaPhone = this.toDarajaMsisdn(stkPhone);
-
     // Initiate the STK push first so we have the real CheckoutRequestID to
     // use as the purchase's paymentReference (the join key).
     const stk = await this.mpesaService.initiateStkPush(
@@ -118,7 +119,6 @@ export class WalletsService {
       },
       agentId,
     );
-
     const purchase = await this.subscriptionPurchasesService.recordPurchase({
       agentId,
       packageId: pkg.id,
@@ -130,11 +130,9 @@ export class WalletsService {
         merchantRequestId: stk.merchantRequestId,
       },
     });
-
     this.logger.log(
       `STK initiated — agent=${agentId} package=${pkg.name} checkoutRequestId=${stk.checkoutRequestId}`,
     );
-
     return {
       purchaseId: purchase.id,
       packageName: pkg.name,
@@ -161,7 +159,6 @@ export class WalletsService {
         timestamp: new Date().toISOString(),
       };
     }
-
     // If still pending, peek at the M-Pesa side. The callback may have already
     // flipped it; if so, reflect that. (Grant still only happens in the grant
     // path — this is read-only reconciliation.)
@@ -177,7 +174,6 @@ export class WalletsService {
         // No M-Pesa txn found / transient — fall through with PENDING.
       }
     }
-
     // Re-read in case the grant path completed it during the poll window.
     const fresh = await this.subscriptionPurchasesService.findOne(purchaseId);
     return {
@@ -186,6 +182,66 @@ export class WalletsService {
       status: fresh!.status,
       timestamp: new Date().toISOString(),
       amount: fresh!.amountPaid,
+    };
+  }
+
+  /**
+   * Pay-with-airtime: the collection number the agent Sambaza's airtime to.
+   * It's the app owner's Safaricom line, set via ADMIN_SUBSCRIPTION_NUMBER so it
+   * can change without a code deploy. The app needs it to build *140*<price>*<num>#.
+   */
+  getAdminSubscriptionNumber(): { adminNumber: string } {
+    const adminNumber = process.env.ADMIN_SUBSCRIPTION_NUMBER?.trim();
+    if (!adminNumber) {
+      throw new NotFoundException(
+        'ADMIN_SUBSCRIPTION_NUMBER is not configured on the server.',
+      );
+    }
+    return { adminNumber };
+  }
+
+  /**
+   * Pay-with-airtime grant. The app calls this AFTER a successful Sambaza
+   * (*140*<price>*<adminNumber>#) confirms on the device. Mirrors Hybrid's
+   * trust-the-USSD-success model: a confirmed Sambaza == airtime received, so we
+   * grant the plan via the SAME single grant path the M-Pesa callback uses
+   * (createPlanFromPurchase) and record a COMPLETED purchase for audit.
+   *
+   * TRUST SURFACE: this trusts the device's success claim — fine for a known
+   * agent roster. To harden for scale, reconcile against the admin SIM's
+   * received-airtime SMS before granting. IDEMPOTENCY: the app must call this
+   * exactly once per confirmed Sambaza (a double call would double-grant).
+   *
+   * NOTE: if your SubscriptionPurchaseStatus enum does not have COMPLETED (e.g.
+   * it's named SUCCESS), change the status value on the line below to match.
+   */
+  async purchaseSubscriptionWithAirtime(agentId: string, packageId: string) {
+    const pkg = await this.subscriptionPackagesService.findOne(packageId);
+    const reference = `AIRTIME-${agentId.slice(0, 8)}-${Date.now()}`;
+    await this.subscriptionPurchasesService.recordPurchase({
+      agentId,
+      packageId: pkg.id,
+      amountPaid: pkg.price,
+      paymentReference: reference,
+      status: SubscriptionPurchaseStatus.COMPLETED,
+      metadata: {
+        method: 'AIRTIME',
+        adminNumber: process.env.ADMIN_SUBSCRIPTION_NUMBER,
+      },
+    });
+    const plan = await this.subscriptionPlansService.createPlanFromPurchase(
+      agentId,
+      pkg.id,
+    );
+    this.logger.log(
+      `Airtime subscription granted — agent=${agentId} package=${pkg.name} ref=${reference}`,
+    );
+    return {
+      packageName: pkg.name,
+      amount: pkg.price,
+      reference,
+      plan,
+      balance: await this.getBalance(agentId),
     };
   }
 
