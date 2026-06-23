@@ -74,8 +74,8 @@ dependencies {
     // Material design
     implementation("com.google.android.material:material:1.11.0")
 
-    // Kotlin stdlib
-    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.1.0")
+    // Kotlin stdlib — keep in lockstep with the KGP version in settings.gradle.kts
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.2.20")
     // ===== ADD THESE =====
     // Coroutines for async operations
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

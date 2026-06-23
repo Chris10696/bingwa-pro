@@ -171,7 +171,16 @@ class _SimSetupScreenState extends ConsumerState<SimSetupScreen>
 
   bool _slotActive(int slot) => _simLabels.containsKey(slot);
 
-  String _label(int slot) => _simLabels[slot] ?? 'SIM $slot';
+  /// Primary row label — always "SIM 1" / "SIM 2" (Hybrid parity). The agent must
+  /// be able to tell the two slots apart to assign roles; the carrier name alone
+  /// can't do that when both SIMs are Safaricom (the bug this screen had).
+  String _slotName(int slot) => 'SIM $slot';
+
+  /// Secondary line — the active carrier (e.g. "Safaricom"), or a not-detected note
+  /// so a slot with no SIM is still legible. A minor, helpful divergence from Hybrid
+  /// (which shows only "SIM 1"/"SIM 2"): it ties the slot to the physical SIM.
+  String _carrierSubtitle(int slot) =>
+      _slotActive(slot) ? (_simLabels[slot] ?? 'Active') : 'Not detected';
 
   // ── Receive (independent) ───────────────────────────────────────────────
   void _onReceiveChanged(int slot, bool value) {
@@ -247,16 +256,16 @@ class _SimSetupScreenState extends ConsumerState<SimSetupScreen>
         _section(
           title: 'Bingwa SIM (To run USSDs)',
           children: [
-            _simRadioRow(1, !_dialViaSim2, () => _onDialSelected(1)),
-            _simRadioRow(2, _dialViaSim2, () => _onDialSelected(2)),
+            _simExclusiveSwitchRow(1, !_dialViaSim2, () => _onDialSelected(1)),
+            _simExclusiveSwitchRow(2, _dialViaSim2, () => _onDialSelected(2)),
           ],
         ),
         const SizedBox(height: 24),
         _section(
           title: 'Send Auto-Replies Using',
           children: [
-            _simRadioRow(1, !_replyViaSim2, () => _onReplySelected(1)),
-            _simRadioRow(2, _replyViaSim2, () => _onReplySelected(2)),
+            _simExclusiveSwitchRow(1, !_replyViaSim2, () => _onReplySelected(1)),
+            _simExclusiveSwitchRow(2, _replyViaSim2, () => _onReplySelected(2)),
           ],
         ),
       ],
@@ -348,51 +357,66 @@ class _SimSetupScreenState extends ConsumerState<SimSetupScreen>
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
         ),
+        // White surface via Material (not a colored BoxDecoration) so the enclosed
+        // ListTiles paint background + ink on a Material ancestor — a colored
+        // DecoratedBox between a ListTile and its Material trips
+        // ListTile._debugCheckBackgroundIsHidden. Outer Container keeps the shadow only.
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(color: Colors.grey.withValues(alpha: 0.15), blurRadius: 6),
             ],
           ),
-          child: Column(children: children),
+          child: Material(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
+            child: Column(children: children),
+          ),
         ),
       ],
     );
   }
 
-  // Independent toggle row.
-  Widget _simSwitchRow(int slot, bool value, ValueChanged<bool> onChanged) {
+  // Shared SIM row: a SIM-card icon, the "SIM N" primary label, the carrier (or
+  // not-detected) subtitle, and a trailing Switch. Hybrid renders EVERY SIM role
+  // with a Material Switch labelled "SIM 1"/"SIM 2" — so all three sections use this
+  // row (receive = independent; dial/reply = exclusive, via the wrappers below).
+  // Disabled (onChanged null) when the slot has no active SIM.
+  Widget _simRow({
+    required int slot,
+    required bool value,
+    required ValueChanged<bool>? onChanged,
+  }) {
     final active = _slotActive(slot);
     return ListTile(
-      leading: const Icon(Icons.sim_card_outlined, color: _green),
-      title: Text(_label(slot)),
-      subtitle: active ? null : Text('SIM $slot — not detected',
-          style: const TextStyle(fontSize: 12, color: Colors.grey)),
-      trailing: Switch(
-        value: value,
-        activeColor: _green,
-        onChanged: active ? onChanged : null,
+      leading: Icon(Icons.sim_card_outlined, color: active ? _green : Colors.grey),
+      title: Text(_slotName(slot),
+          style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(
+        _carrierSubtitle(slot),
+        style: TextStyle(fontSize: 12, color: active ? Colors.grey[600] : Colors.grey),
       ),
+      trailing: Switch(value: value, activeThumbColor: _green, onChanged: onChanged),
+      onTap: (active && onChanged != null) ? () => onChanged(!value) : null,
     );
   }
 
-  // Exclusive (radio) row.
-  Widget _simRadioRow(int slot, bool selected, VoidCallback onSelected) {
-    final active = _slotActive(slot);
-    return ListTile(
-      leading: const Icon(Icons.sim_card_outlined, color: _green),
-      title: Text(_label(slot)),
-      subtitle: active ? null : Text('SIM $slot — not detected',
-          style: const TextStyle(fontSize: 12, color: Colors.grey)),
-      trailing: Radio<bool>(
-        value: true,
-        groupValue: selected ? true : null,
-        activeColor: _green,
-        onChanged: active ? (_) => onSelected() : null,
-      ),
-      onTap: active ? onSelected : null,
-    );
-  }
+  // Independent toggle (SIM to receive payments): each SIM on/off on its own.
+  // Mirrors Hybrid's validateEnabledSimCards, which reads RECEIVE_PAYMENTS_VIA_SIM_1
+  // AND _SIM_2 as a set (either / both / neither).
+  Widget _simSwitchRow(int slot, bool value, ValueChanged<bool> onChanged) =>
+      _simRow(slot: slot, value: value, onChanged: _slotActive(slot) ? onChanged : null);
+
+  // Exclusive selector rendered as a Switch (dial / auto-reply). Hybrid stores this
+  // as the single _VIA_SIM_2 boolean its resolver reads (slot = VIA_SIM_2 ? 2 : 1),
+  // so picking a slot just sets that boolean. Tapping the already-on SIM re-selects
+  // it (can't switch it off) — exactly one stays selected, like a radio.
+  Widget _simExclusiveSwitchRow(int slot, bool selected, VoidCallback onSelected) =>
+      _simRow(
+        slot: slot,
+        value: selected,
+        onChanged: _slotActive(slot) ? (_) => onSelected() : null,
+      );
 }
