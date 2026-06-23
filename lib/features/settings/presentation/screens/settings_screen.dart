@@ -414,10 +414,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
   Widget _buildSettingsCard(List<Widget> children) {
+    // The white surface is provided by a Material (not the Container's BoxDecoration)
+    // so the enclosed ListTiles paint their background + ink splashes on a Material
+    // ancestor. A colored DecoratedBox between a ListTile and its Material trips
+    // ListTile._debugCheckBackgroundIsHidden. The outer Container keeps only the
+    // shadow (no color), so it no longer hides those effects.
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white,
         borderRadius: BorderRadius.circular(10),
         boxShadow: [
           BoxShadow(
@@ -427,8 +431,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ],
       ),
-      child: Column(
-        children: children,
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: children,
+        ),
       ),
     );
   }
