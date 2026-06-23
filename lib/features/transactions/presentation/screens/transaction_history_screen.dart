@@ -327,6 +327,9 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
   }
 
   String _formatDate(DateTime date) {
+    // Backend timestamps are UTC; convert to local (EAT) before bucketing/formatting,
+    // else both the Today/Yesterday split and _formatTime (raw .hour/.minute) read UTC.
+    date = date.toLocal();
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final yesterday = today.subtract(const Duration(days: 1));

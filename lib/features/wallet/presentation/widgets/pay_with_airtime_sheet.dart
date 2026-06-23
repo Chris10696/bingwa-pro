@@ -19,23 +19,28 @@
 //      [addSubscriptionUseCase]
 //
 // Rides the same USSD engine as offers; a Sambaza is the simplest single-step,
-// agent-initiated case. The grant trusts the dialed SUCCESS (Hybrid's model).
+// agent-initiated case. The grant trusts the dialed SUCCESS (Hybrid's model) — and
+// the native side now demotes a low-balance "success" to FAILED (SambazaFailureGuard)
+// so a transfer that did not actually move airtime never reaches this grant.
+//
+// POLL NOTE: GET /transactions/:id/status returns a SLIM payload
+// ({id, status, reference, errorMessage, ussdResponse}), NOT a full transaction. We
+// therefore poll via TransactionRepository.getTransactionStatusLite (which parses the
+// slim shape tolerantly) and compare the backend status STRING directly. The earlier
+// full-model parse threw on every tick, was swallowed by the poll's catch, and the
+// sheet hung on "Sending airtime…" until the cap — so airtime moved but no plan granted.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/services/session_bridge_service.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../shared/models/subscription_package_model.dart';
-import '../../../../shared/models/transaction_model.dart';
 import '../../../../shared/repositories/transaction_repository.dart';
 import '../../../../shared/repositories/wallet_repository.dart';
 import '../providers/wallet_provider.dart';
-
 enum _Phase { confirm, dialing, granting, success, error }
-
 class PayWithAirtimeSheet extends ConsumerStatefulWidget {
   final SubscriptionPackage package;
   const PayWithAirtimeSheet({super.key, required this.package});
-
   /// Opens the sheet. Resolves to `true` if a plan was granted.
   static Future<bool?> show(BuildContext context, SubscriptionPackage pkg) {
     return showModalBottomSheet<bool>(
@@ -45,7 +50,6 @@ class PayWithAirtimeSheet extends ConsumerStatefulWidget {
       builder: (_) => PayWithAirtimeSheet(package: pkg),
     );
   }
-
   @override
   ConsumerState<PayWithAirtimeSheet> createState() =>
       _PayWithAirtimeSheetState();
@@ -53,21 +57,21 @@ class PayWithAirtimeSheet extends ConsumerStatefulWidget {
 
 class _PayWithAirtimeSheetState extends ConsumerState<PayWithAirtimeSheet> {
   static const _green = Color(0xFF00C853);
-
   // Status-poll cadence + cap — same shape as quick_dial_provider.
   static const Duration _pollInterval = Duration(seconds: 2);
   static const int _maxPolls = 60;
-  static const Set<TransactionStatus> _terminal = {
-    TransactionStatus.success,
-    TransactionStatus.failed,
-    TransactionStatus.failedAlreadyRecommended,
-    TransactionStatus.failedOfferDeactivated,
-    TransactionStatus.blocked,
+  // Backend status STRINGS that are terminal. Compared directly (rather than via the
+  // TransactionStatus enum) because the poll now reads the slim /status payload through
+  // getTransactionStatusLite, and a raw-string match also sidesteps any enum-mapping drift.
+  static const Set<String> _terminalStatuses = {
+    'SUCCESS',
+    'FAILED',
+    'FAILED_ALREADY_RECOMMENDED',
+    'FAILED_OFFER_DEACTIVATED',
+    'BLOCKED',
   };
-
   _Phase _phase = _Phase.confirm;
   String? _error;
-
   void _fail(String message) {
     if (!mounted) return;
     setState(() {
@@ -75,7 +79,6 @@ class _PayWithAirtimeSheetState extends ConsumerState<PayWithAirtimeSheet> {
       _error = message;
     });
   }
-
   Future<void> _pay() async {
     setState(() {
       _phase = _Phase.dialing;
@@ -117,7 +120,6 @@ class _PayWithAirtimeSheetState extends ConsumerState<PayWithAirtimeSheet> {
             'then try again.');
         return;
       }
-
       // 3. Observe the dial outcome.
       final result = await _pollStatus(txnId);
       if (!mounted) return;
@@ -137,7 +139,6 @@ class _PayWithAirtimeSheetState extends ConsumerState<PayWithAirtimeSheet> {
         }
         return;
       }
-
       // 4. SUCCESS → grant the plan, then refresh the wallet behind us.
       setState(() => _phase = _Phase.granting);
       await ref
@@ -151,26 +152,24 @@ class _PayWithAirtimeSheetState extends ConsumerState<PayWithAirtimeSheet> {
           'History before retrying.');
     }
   }
-
   /// Poll the transaction status until terminal → (success, responseText).
+  ///
+  /// Uses the SLIM-payload-tolerant [TransactionRepository.getTransactionStatusLite]
+  /// and matches the backend status string against [_terminalStatuses]. `success` is
+  /// strictly `status == 'SUCCESS'`; any FAILED_* / BLOCKED is a non-success terminal.
   Future<(bool, String)?> _pollStatus(String txnId) async {
     for (var i = 0; i < _maxPolls; i++) {
       await Future.delayed(_pollInterval);
-      TransactionResponse status;
+      ({String status, String responseText}) s;
       try {
-        status = await ref
+        s = await ref
             .read(transactionRepositoryProvider)
-            .getTransactionStatus(txnId);
+            .getTransactionStatusLite(txnId);
       } catch (_) {
-        continue; // transient read error — keep polling
+        continue; // genuine transient read error — keep polling
       }
-      if (!_terminal.contains(status.status)) continue;
-      final success = status.status == TransactionStatus.success;
-      final text = (status.ussdResponse != null &&
-              status.ussdResponse!.trim().isNotEmpty)
-          ? status.ussdResponse!
-          : (status.errorMessage ?? '');
-      return (success, text);
+      if (!_terminalStatuses.contains(s.status)) continue;
+      return (s.status == 'SUCCESS', s.responseText);
     }
     return null;
   }
@@ -180,14 +179,14 @@ class _PayWithAirtimeSheetState extends ConsumerState<PayWithAirtimeSheet> {
     return m.contains('insufficient') ||
         m.contains('do not have enough') ||
         m.contains("don't have enough") ||
-        m.contains('not enough');
+        m.contains('not enough') ||
+        m.contains('too low') ||
+        m.contains('recharge your account');
   }
-
   String? _extractMessage(dynamic data) {
     if (data is Map && data['message'] != null) return data['message'].toString();
     return null;
   }
-
   int? _asInt(dynamic v) {
     if (v == null) return null;
     if (v is int) return v;
@@ -195,7 +194,6 @@ class _PayWithAirtimeSheetState extends ConsumerState<PayWithAirtimeSheet> {
     if (v is String) return double.tryParse(v)?.toInt();
     return null;
   }
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -245,7 +243,6 @@ class _PayWithAirtimeSheetState extends ConsumerState<PayWithAirtimeSheet> {
         return _errorView();
     }
   }
-
   Widget _confirmView() {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -300,7 +297,6 @@ class _PayWithAirtimeSheetState extends ConsumerState<PayWithAirtimeSheet> {
       ),
     );
   }
-
   Widget _successView() {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -329,7 +325,6 @@ class _PayWithAirtimeSheetState extends ConsumerState<PayWithAirtimeSheet> {
       ],
     );
   }
-
   Widget _errorView() {
     return Column(
       mainAxisSize: MainAxisSize.min,

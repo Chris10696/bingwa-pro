@@ -26,17 +26,21 @@ class Formatters {
     return _compactCurrency.format(amount);
   }
   
-  // Date formatting
+  // Date formatting.
+  // Backend timestamps are UTC (trailing `Z`); DateTime.parse keeps them UTC, and
+  // DateFormat reads the DateTime's own (UTC) wall-clock fields. So convert to local
+  // (device is EAT / UTC+3) before formatting. .toLocal() is a no-op on already-local
+  // values (e.g. DateTime.now()), so this is safe to apply unconditionally.
   static String formatDate(DateTime date) {
-    return _dateFormat.format(date);
+    return _dateFormat.format(date.toLocal());
   }
-  
+
   static String formatTime(DateTime time) {
-    return _timeFormat.format(time);
+    return _timeFormat.format(time.toLocal());
   }
-  
+
   static String formatDateTime(DateTime dateTime) {
-    return _dateTimeFormat.format(dateTime);
+    return _dateTimeFormat.format(dateTime.toLocal());
   }
   
   static String formatRelativeTime(DateTime dateTime) {

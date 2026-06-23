@@ -14,7 +14,6 @@ package com.example.bingwa_pro
  * SUCCESS/FAILED — that is set by which sendUssdRequest callback fired (see UssdEngine).
  */
 object UssdResponseClassifier {
-
     fun isAlreadyRecommended(response: String): Boolean =
         response.contains("already been recommended", ignoreCase = true)
 
@@ -42,4 +41,25 @@ object UssdResponseClassifier {
     /** Hybrid TransactionUtilsKt.isNonRetriableResponse = Okoa-Jahazi OR Excessive-SQLs. */
     fun isNonRetriable(response: String): Boolean =
         isOkoaJahaziFailure(response) || isSqlError(response)
+
+    // ── Pay-with-airtime money-safety (NOT a Hybrid retry classifier) ───────────────────
+    /**
+     * True when a captured USSD response is a Sambaza/airtime-transfer FAILURE that Safaricom
+     * nonetheless delivers through the sendUssdRequest SUCCESS callback (so UssdEngine reports
+     * success=true). [UssdExecutionService.processOne] uses this to DEMOTE such a "success" to
+     * FAILED *before* any plan grant, so the app owner is never charged a free subscription for
+     * a transfer that did not actually move airtime.
+     *
+     * Kept SEPARATE from the verbatim Hybrid classifiers above (which must not change). It reuses
+     * [isInsufficientBalance] (covers "insufficient account balance …", observed live) and adds the
+     * second wording Safaricom uses on low balance ("… balance is too low … recharge your account").
+     *
+     * Deliberately specific to failure: a genuine transfer confirmation
+     * ("You have transferred 30.00 KSH … Your account balance is : 6.42 KSH …") contains none of
+     * "insufficient", "too low", or "recharge your account", so it is never demoted.
+     */
+    fun isSambazaFailure(response: String): Boolean =
+        isInsufficientBalance(response) ||
+        response.contains("too low", ignoreCase = true) ||
+        response.contains("recharge your account", ignoreCase = true)
 }

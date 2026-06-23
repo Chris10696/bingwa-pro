@@ -1,6 +1,5 @@
 // C:\bingwa_pro\android\app\src\main\kotlin\com\example\bingwa_pro\UssdExecutionService.kt
 package com.example.bingwa_pro
-
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -29,7 +28,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-
 /**
  * W3.D — foreground-service queue dialer (Hybrid's UssdDialerService equivalent).
  *
@@ -49,36 +47,31 @@ import java.util.concurrent.atomic.AtomicBoolean
  * and what follows it. An in-flight guard prevents the same transaction being dialed
  * twice within this process.
  */
+
 class UssdExecutionService : Service() {
     private val TAG = "UssdService"
     private val NOTIFICATION_ID = 1001
     private val CHANNEL_ID = "bingwa_ussd_channel"
-
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val draining = AtomicBoolean(false)
-
     private val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build()
     }
-
     companion object {
         private const val JSON_MEDIA = "application/json; charset=utf-8"
         private const val ONE_DAY_MS = 24L * 60L * 60L * 1000L
         // Matches Offer entity default (60000ms) when no offer/config is available.
         private const val DEFAULT_TIMEOUT_MS = 60_000L
-
         var isRunning: Boolean = false
             private set
-
         // Serial work queue — Hybrid's Mutex-guarded transactionQueue equivalent.
         // A single drain coroutine consumes it, so dials never overlap.
         private val queue = ConcurrentLinkedQueue<DialRequest>()
         // Prevents dialing the same transaction twice within this process.
         private val inFlight: MutableSet<String> = ConcurrentHashMap.newKeySet()
-
         /**
          * Enqueue a dial and ensure the foreground service is running to drain it.
          * Called by ScheduleTransactionWorker once the row is confirmed SCHEDULED.
@@ -93,7 +86,6 @@ class UssdExecutionService : Service() {
             }
         }
     }
-
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -111,7 +103,6 @@ class UssdExecutionService : Service() {
         // Drain-and-quit: nothing useful to do on a sticky restart with an empty queue.
         return START_NOT_STICKY
     }
-
     private fun startInForeground() {
         val notification = createNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -125,7 +116,6 @@ class UssdExecutionService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
     }
-
     private suspend fun drainQueue() {
         try {
             while (true) {
@@ -170,14 +160,12 @@ class UssdExecutionService : Service() {
     private suspend fun processOne(req: DialRequest) {
         val engine = UssdEngine(applicationContext, dryRun = false)
         val finalCode = engine.formatUssdCode(req.ussdTemplate, req.customerPhone, req.amount)
-
         // Missing/invalid code → FAILED "USSD code is missing" (Hybrid parity), no dial.
         if (finalCode.isBlank() || !finalCode.contains("*")) {
             Log.e(TAG, "Txn ${req.transactionId}: invalid USSD code '$finalCode' — marking FAILED")
             patchStatusBestEffort(req, "FAILED", "USSD code is missing", null)
             return
         }
-
         // Fetch the offer for the retry config + type (GET /offers/:id is unscoped and
         // returns the 8 retry fields + type + ussdTimeoutMillis). If it can't be fetched,
         // fall back to a no-retry profile so a failure just lands FAILED (never an
@@ -185,7 +173,6 @@ class UssdExecutionService : Service() {
         val offer = req.offerId?.let { fetchOffer(req, it) }
         val timeoutMillis = offer?.ussdTimeoutMillis ?: DEFAULT_TIMEOUT_MS
         val offerType = offer?.type ?: "NONE"
-
         // W3.C — processing mode decides Express vs Advanced dialing, EXCEPT renewals always
         // force Express (Hybrid forces Express for SUBSCRIPTION_RENEWAL + AIRTIME_BALANCE_CHECK).
         // isRecurringRenewal is the renewal marker; balance checks never route through here.
@@ -193,7 +180,6 @@ class UssdExecutionService : Service() {
         // mode into SessionBridge, this resolves to Express for every current caller.
         val advanced = !req.isRecurringRenewal &&
             SessionBridge.getProcessingMode(applicationContext) == "advanced"
-
         // PreDial parity: mark PROCESSING (best-effort — the dial is what matters).
         patchStatusBestEffort(req, "PROCESSING", null, null)
 
@@ -213,7 +199,6 @@ class UssdExecutionService : Service() {
                 engine.dialExpressCapturing(finalCode, req.customerPhone, timeoutMillis)
             }
             Log.d(TAG, "Dialed ${req.transactionId} (${if (advanced) "ADVANCED" else "EXPRESS"}) → success=${result.success} timeout=${result.isTimeout} (internal $internalRetries/$maxInternal)")
-
             if (result.success) break                       // SUCCESS → leave loop
             if (result.isTimeout) break                     // timeout → TimeoutChain (no internal retry)
             val response = result.response ?: ""
@@ -225,12 +210,10 @@ class UssdExecutionService : Service() {
             Log.d(TAG, "Internal retry ${req.transactionId} attempt $internalRetries/$maxInternal")
             // loop re-dials immediately (same session semantics as Hybrid's re-queue)
         }
-
         // ════════════════════════════════════════════════════════════════════════
         // StatusClassifier + Branching
         // ════════════════════════════════════════════════════════════════════════
         val response = result.response ?: ""
-
         // StatusClassifier: already-recommended demotes (applies to SUCCESS and FAILED alike;
         // Safaricom delivers "already recommended" via the success callback).
         if (UssdResponseClassifier.isAlreadyRecommended(response)) {
@@ -239,6 +222,21 @@ class UssdExecutionService : Service() {
             // AlreadyRecommendedChain reschedules iff offer.autoReschedule (W3 carries the
             // flag; the next-day arm reuses the recurrence anchor).
             if (offer?.autoReschedule == true) scheduleExternalRetryOrRenew(req, isRenewAnchor = true)
+            return
+        }
+
+        // ── SambazaFailureGuard (pay-with-airtime money-safety) ───────────────────────────
+        // A captured response can carry a FAILURE even though sendUssdRequest "completed":
+        // Safaricom delivers low-balance Sambaza errors ("insufficient account balance …" /
+        // "… balance is too low … recharge your account") through the SUCCESS callback, so the
+        // engine reports success=true. Demote those to FAILED here, BEFORE the success branch,
+        // so neither the SUCCESS PATCH nor any plan grant keyed off SUCCESS ever runs on a
+        // transfer that did not actually move airtime (which would hand the agent a free plan).
+        // Genuine transfers ("You have transferred …") match none of these tokens → fall through.
+        if (result.success && UssdResponseClassifier.isSambazaFailure(response)) {
+            Log.d(TAG, "Txn ${req.transactionId}: success callback carried a Sambaza FAILURE — demoting to FAILED")
+            patchStatusBestEffort(req, "FAILED", response, response)
+            sendAutoReply(req, "FAILED")
             return
         }
 
@@ -254,17 +252,14 @@ class UssdExecutionService : Service() {
             if (req.isRecurringRenewal) maybeScheduleNext(req)
             return
         }
-
         // Timeout → TimeoutChain: FAILED "Failed: Transaction timed out", then external retry.
         if (result.isTimeout) {
             handleExternalRetry(req, offer, offerType, response = "Failed: Transaction timed out", isTimeout = true)
             return
         }
-
         // FAILED → InternalRetry already exhausted above → ExternalRetry → Failure.
         handleExternalRetry(req, offer, offerType, response = response, isTimeout = false)
     }
-
     /**
      * ExternalRetryHandler (verbatim port, confirmed against bytecode). DELAYED retry:
      * reschedules the SAME transaction for now+retryIntervalMins (status RESCHEDULED) and
@@ -325,7 +320,6 @@ class UssdExecutionService : Service() {
         WorkScheduler.arm(applicationContext, req.transactionId, retryAt, req.externalRetries + 1)
         Log.d(TAG, "External retry ${req.transactionId}: armed at +${offer.retryIntervalMins}min (attempt ${req.externalRetries + 1}/${offer.numberOfRetries})")
     }
-
     /** AlreadyRecommended reschedule helper — re-arms the same row one day out (renew anchor). */
     private fun scheduleExternalRetryOrRenew(req: DialRequest, isRenewAnchor: Boolean) {
         val anchor = if (req.triggerAtMillis > 0L) req.triggerAtMillis else System.currentTimeMillis()
@@ -333,7 +327,6 @@ class UssdExecutionService : Service() {
         WorkScheduler.arm(applicationContext, req.transactionId, nextMillis, req.externalRetries)
         Log.d(TAG, "Already-recommended reschedule ${req.transactionId} at +1 day")
     }
-
     // Internal-retry maxima — now mode-aware (W3.C unlocks the ADVANCED column). Confirmed
     // against Hybrid bytecode WhenMappings: EXPRESS{DATA 10, SMS 2, VOICE 1};
     // ADVANCED{DATA 3, SMS 1, VOICE 1}. NONE/unknown → 0 (no switch case → default 0, NOT
@@ -345,7 +338,6 @@ class UssdExecutionService : Service() {
             "VOICE" -> 1
             else -> 0   // NONE / unknown → no internal retry (Hybrid default branch = 0)
         }
-
     /** GET /offers/:id (unscoped) → retry config. Best-effort; null on any failure. */
     private fun fetchOffer(req: DialRequest, offerId: String): OfferConfig? {
         return try {
@@ -432,7 +424,6 @@ class UssdExecutionService : Service() {
             Log.e(TAG, "PATCH $status ${req.transactionId} failed: ${e.message}", e)
         }
     }
-
     /**
      * W3.M — fire the customer auto-reply for a terminal [status] (Hybrid AutoReplyHandler:
      * type is a pure function of the final transaction status; the send runs on a background
@@ -488,10 +479,8 @@ class UssdExecutionService : Service() {
             null
         }
     }
-
     private fun formatLocalIso(millis: Long): String =
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.US).format(Date(millis))
-
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // IMPORTANCE_HIGH is required for the full-screen intent (background dial
@@ -539,9 +528,7 @@ class UssdExecutionService : Service() {
             .setFullScreenIntent(fullScreen, true)
             .build()
     }
-
     override fun onBind(intent: Intent?): IBinder? = null
-
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false

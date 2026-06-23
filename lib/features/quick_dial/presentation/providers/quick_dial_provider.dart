@@ -28,7 +28,6 @@ import '../../../../core/services/session_bridge_service.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../core/utils/ussd_template_formatter.dart';
 import '../../../../shared/models/offer_model.dart';
-import '../../../../shared/models/transaction_model.dart';
 import '../../../../shared/repositories/transaction_repository.dart';
 
 enum QuickDialPhase { idle, recording, dialing, success, error }
@@ -94,12 +93,18 @@ class QuickDialNotifier extends StateNotifier<QuickDialState> {
   static const Duration _pollInterval = Duration(seconds: 2);
   static const int _maxPolls = 60;
 
-  static const Set<TransactionStatus> _terminal = {
-    TransactionStatus.success,
-    TransactionStatus.failed,
-    TransactionStatus.failedAlreadyRecommended,
-    TransactionStatus.failedOfferDeactivated,
-    TransactionStatus.blocked,
+  // Backend status STRINGS that are terminal. Compared directly because the poll now
+  // reads the SLIM /status payload via getTransactionStatusLite — routing that through
+  // TransactionResponse.fromJson threw `type 'Null' is not a subtype of type 'String'`
+  // on every tick (the slim shape lacks the full model's required fields), the poll's
+  // catch swallowed it, and the result dialog hung on its spinner to the cap. This
+  // mirrors the pay-with-airtime sheet's fix.
+  static const Set<String> _terminalStatuses = {
+    'SUCCESS',
+    'FAILED',
+    'FAILED_ALREADY_RECOMMENDED',
+    'FAILED_OFFER_DEACTIVATED',
+    'BLOCKED',
   };
 
   void selectOffer(Offer offer) {
@@ -247,22 +252,20 @@ class QuickDialNotifier extends StateNotifier<QuickDialState> {
   Future<void> _observeStatus(String transactionId) async {
     for (var i = 0; i < _maxPolls; i++) {
       await Future.delayed(_pollInterval);
-      TransactionResponse status;
+      ({String status, String responseText}) s;
       try {
-        status = await _transactionRepository.getTransactionStatus(transactionId);
+        s = await _transactionRepository.getTransactionStatusLite(transactionId);
       } catch (e) {
         // Transient read error — keep polling; the pipeline is still running.
         AppLogger.d('Quick Dial status poll error (continuing): $e');
         continue;
       }
-      if (!_terminal.contains(status.status)) continue;
+      if (!_terminalStatuses.contains(s.status)) continue;
 
-      final success = status.status == TransactionStatus.success;
-      final responseText = (status.ussdResponse != null &&
-              status.ussdResponse!.trim().isNotEmpty)
-          ? status.ussdResponse!
-          : (status.errorMessage ??
-              (success ? 'Request successful' : 'Request failed'));
+      final success = s.status == 'SUCCESS';
+      final responseText = s.responseText.trim().isNotEmpty
+          ? s.responseText
+          : (success ? 'Request successful' : 'Request failed');
       state = state.copyWith(
         phase: success ? QuickDialPhase.success : QuickDialPhase.error,
         dialedSuccess: success,
