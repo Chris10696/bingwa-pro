@@ -638,7 +638,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             style: const TextStyle(
                 fontWeight: FontWeight.w600, fontSize: 14)),
         subtitle: Text(
-          DateFormat('dd MMM yyyy, HH:mm').format(purchase.createdAt),
+          DateFormat('dd MMM yyyy, HH:mm').format(purchase.createdAt.toLocal()),
           style: const TextStyle(fontSize: 12),
         ),
         trailing: Column(

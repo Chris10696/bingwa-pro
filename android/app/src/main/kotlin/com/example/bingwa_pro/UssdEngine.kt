@@ -108,6 +108,7 @@ class UssdEngine(
                             request: String,
                             response: CharSequence
                         ) {
+                            Log.d("UssdEngine", "Sambaza/USSD response: $response")   // TEMP — remove before release
                             if (resumed.compareAndSet(false, true)) {
                                 cont.resume(UssdDialResult(true, response.toString()), null)
                             }

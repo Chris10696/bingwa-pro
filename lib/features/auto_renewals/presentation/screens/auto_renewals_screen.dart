@@ -150,7 +150,7 @@ class _AutoRenewalsScreenState extends ConsumerState<AutoRenewalsScreen> {
               const SizedBox(height: 6),
               _infoRow(
                 Icons.schedule,
-                'Next: ${DateFormat('dd MMM yyyy, HH:mm').format(scheduledFor)}',
+                'Next: ${DateFormat('dd MMM yyyy, HH:mm').format(scheduledFor.toLocal())}',
               ),
             ],
             if (isRecurring && daysRemaining != null) ...[

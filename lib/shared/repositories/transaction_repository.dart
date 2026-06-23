@@ -12,11 +12,9 @@ import '../../core/network/dio_client.dart';
 import '../../core/constants/api_constants.dart';
 import '../../core/utils/logger.dart';
 import '../models/transaction_model.dart';
-
 class TransactionRepository {
   final Dio _dio;
   TransactionRepository(this._dio);
-
   Future<TransactionResponse> getTransactionStatus(String transactionId) async {
     try {
       final url = ApiConstants.transactionStatus.replaceFirst(
@@ -40,6 +38,45 @@ class TransactionRepository {
       AppLogger.e('Get transaction status error:', e);
       rethrow;
     }
+  }
+
+  /// Lightweight status poll for the pay-with-airtime / quick-dial sheets.
+  ///
+  /// GET /transactions/:id/status returns a SLIM payload —
+  /// {id, status, reference, errorMessage, ussdResponse} — NOT a full transaction.
+  /// Routing that through [TransactionResponse.fromJson] throws
+  /// `type 'Null' is not a subtype of type 'String' in type cast`, because the model's
+  /// required fields (transactionId, timestamp, amount) are absent from the slim shape.
+  /// That exception was being swallowed by the poll loop's `catch`, so the poll spun to
+  /// its cap and never granted — airtime moved but no plan was granted.
+  ///
+  /// This reads only what a poll needs, tolerantly, so it never crashes on the slim shape.
+  /// It returns the RAW backend status string (e.g. 'SUCCESS', 'FAILED', 'PROCESSING',
+  /// 'FAILED_ALREADY_RECOMMENDED', 'BLOCKED') and the best available response text
+  /// (ussdResponse, else errorMessage, else ''). A genuine network/transport error still
+  /// throws (DioException) so the caller's retry loop can keep polling.
+  Future<({String status, String responseText})> getTransactionStatusLite(
+    String transactionId,
+  ) async {
+    final url = ApiConstants.transactionStatus.replaceFirst(
+      '{id}',
+      transactionId,
+    );
+    AppLogger.logNetworkRequest(method: 'GET', url: url);
+    final response = await _dio.get(url);
+    AppLogger.logNetworkResponse(
+      statusCode: response.statusCode ?? 0,
+      url: url,
+      data: response.data,
+    );
+    final map = (response.data as Map).cast<String, dynamic>();
+    final status = (map['status'] ?? '').toString();
+    final ussd = (map['ussdResponse'] ?? '').toString();
+    final err = (map['errorMessage'] ?? '').toString();
+    return (
+      status: status,
+      responseText: ussd.trim().isNotEmpty ? ussd : err,
+    );
   }
 
   Future<TransactionListResponse> getTransactionHistory(
@@ -110,7 +147,6 @@ class TransactionRepository {
       rethrow;
     }
   }
-
   // Q3 default: kept intact even though no W1 caller remains.
   Future<UssdHealthCheck> getUssdHealthStatus() async {
     try {
@@ -155,7 +191,6 @@ class TransactionRepository {
       rethrow;
     }
   }
-
   Future<TransactionSummary> getTransactionSummary(String period) async {
     try {
       final url = '/transactions/summary/$period';
@@ -177,7 +212,6 @@ class TransactionRepository {
       rethrow;
     }
   }
-
   Future<void> reportTransactionIssue({
     required String transactionId,
     required String issueType,
@@ -227,7 +261,6 @@ class TransactionRepository {
       url: ApiConstants.transactions, data: response.data);
     return response;
   }
-
   // Pay-with-airtime: POST /transactions/airtime-subscription. Creates the
   // SUBSCRIPTION_RENEWAL Sambaza transaction (no token debit). validateStatus<500,
   // so a non-2xx resolves — caller inspects statusCode.
@@ -240,7 +273,6 @@ class TransactionRepository {
         statusCode: response.statusCode ?? 0, url: url, data: response.data);
     return response;
   }
-
   // W2.F: GET /transactions/scheduled. amount is a Postgres decimal → arrives
   // as either a number (50) or a string ("49.00"); parse tolerantly.
   Future<List<ScheduledTransaction>> getScheduled() async {
@@ -260,14 +292,12 @@ class TransactionRepository {
       );
     }).toList();
   }
-
   // Tolerant numeric parse: backend decimals come as String, ints as num.
   double _toDouble(dynamic v) {
     if (v == null) return 0.0;
     if (v is num) return v.toDouble();
     return double.tryParse(v.toString()) ?? 0.0;
   }
-
   // W2.F: POST /transactions/schedule.
   Future<ScheduledTransaction> schedule(ScheduleTransactionRequest req) async {
     final response =
@@ -284,13 +314,11 @@ class TransactionRepository {
       createdAt: DateTime.parse(m['createdAt'] as String),
     );
   }
-
   // W2.F: DELETE /transactions/scheduled/:id.
   Future<void> cancelScheduled(String id) async {
     await _dio.delete('${ApiConstants.scheduledTransactions}/$id');
   }
 }
-
 final transactionRepositoryProvider = Provider<TransactionRepository>((ref) {
   final dio = ref.watch(dioClientProvider);
   return TransactionRepository(dio);

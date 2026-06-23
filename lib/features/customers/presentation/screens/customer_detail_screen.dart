@@ -227,7 +227,7 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
                           ),
                           if (customer.blacklistedAt != null)
                             Text(
-                              'Since: ${DateFormat('dd MMM yyyy').format(customer.blacklistedAt!)}',
+                              'Since: ${DateFormat('dd MMM yyyy').format(customer.blacklistedAt!.toLocal())}',
                               style: const TextStyle(fontSize: 12),
                             ),
                         ],
@@ -357,14 +357,14 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
               Icons.calendar_today,
               'First Transaction',
               customer.firstTransactionAt != null
-                  ? DateFormat('dd MMM yyyy').format(customer.firstTransactionAt!)
+                  ? DateFormat('dd MMM yyyy').format(customer.firstTransactionAt!.toLocal())
                   : 'No transactions yet',
             ),
             _buildInfoRow(
               Icons.access_time,
               'Last Transaction',
               customer.lastTransactionAt != null
-                  ? DateFormat('dd MMM yyyy, HH:mm').format(customer.lastTransactionAt!)
+                  ? DateFormat('dd MMM yyyy, HH:mm').format(customer.lastTransactionAt!.toLocal())
                   : 'No transactions yet',
             ),
           ],
@@ -527,7 +527,7 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
                 ),
                 title: Text(transaction.type.name.toUpperCase()),
                 subtitle: Text(
-                  DateFormat('dd MMM yyyy, HH:mm').format(transaction.createdAt),
+                  DateFormat('dd MMM yyyy, HH:mm').format(transaction.createdAt.toLocal()),
                 ),
                 trailing: Text(
                   Formatters.formatCurrency(transaction.amount),

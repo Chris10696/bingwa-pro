@@ -242,9 +242,14 @@ class MainActivity : FlutterActivity() {
                     "enqueueQuickDial" -> {
                         val transactionId = call.argument<String>("transactionId")
                         val ussdCode = call.argument<String>("ussdCode")
-                        val customerPhone = call.argument<String>("customerPhone")
-                        if (transactionId.isNullOrBlank() || ussdCode.isNullOrBlank() || customerPhone.isNullOrBlank()) {
-                            result.error("BAD_ARGS", "transactionId, ussdCode, customerPhone are required", null)
+                        // customerPhone is OPTIONAL. A blank value is a valid sentinel meaning
+                        // "self-contained dial, no auto-reply" — used by pay-with-airtime, whose
+                        // Sambaza code (*140*amount*adminNumber#) already carries its recipient and
+                        // must NOT auto-reply. Quick Dial always passes a real, UI-validated number.
+                        // Only transactionId + ussdCode are truly required.
+                        val customerPhone = call.argument<String>("customerPhone") ?: ""
+                        if (transactionId.isNullOrBlank() || ussdCode.isNullOrBlank()) {
+                            result.error("BAD_ARGS", "transactionId and ussdCode are required", null)
                         } else {
                             val token = SessionBridge.getToken(applicationContext)
                             val baseUrl = SessionBridge.getBaseUrl(applicationContext)

@@ -870,7 +870,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             _buildDetailRow(
               'Last Check',
               health?.lastChecked != null
-                  ? DateFormat('HH:mm:ss').format(health!.lastChecked)
+                  ? DateFormat('HH:mm:ss').format(health!.lastChecked.toLocal())
                   : 'Never',
             ),
             const SizedBox(height: 16),
