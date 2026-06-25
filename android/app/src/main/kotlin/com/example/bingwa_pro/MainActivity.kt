@@ -196,6 +196,66 @@ class MainActivity : FlutterActivity() {
                             result.success(true)
                         }
                     }
+                    // ── W4: Till / SiteLink processing toggles + getters (Settings load) ──
+                    "saveProcessTill" -> {
+                        val enabled = call.argument<Boolean>("enabled")
+                        if (enabled == null) result.error("BAD_ARGS", "enabled is required", null)
+                        else { SessionBridge.saveProcessTill(applicationContext, enabled); result.success(true) }
+                    }
+                    "saveProcessSiteLink" -> {
+                        val enabled = call.argument<Boolean>("enabled")
+                        if (enabled == null) result.error("BAD_ARGS", "enabled is required", null)
+                        else { SessionBridge.saveProcessSiteLink(applicationContext, enabled); result.success(true) }
+                    }
+                    "getProcessMpesa" -> result.success(SessionBridge.getProcessMpesa(applicationContext))
+                    "getProcessTill" -> result.success(SessionBridge.getProcessTill(applicationContext))
+                    "getProcessSiteLink" -> result.success(SessionBridge.getProcessSiteLink(applicationContext))
+                    // ── W4-batch-4: Auto-Save Contacts toggle ──
+                    "saveAutoSaveContacts" -> {
+                        val enabled = call.argument<Boolean>("enabled")
+                        if (enabled == null) result.error("BAD_ARGS", "enabled is required", null)
+                        else { SessionBridge.saveAutoSaveContacts(applicationContext, enabled); result.success(true) }
+                    }
+                    "getAutoSaveContacts" -> result.success(SessionBridge.getAutoSaveContacts(applicationContext))
+                    // ── W4-batch-5: Auto-Reply template edit surface ──
+                    "getAutoReplies" -> {
+                        val list = AutoReplyTemplates.AutoReplyType.values().map { t ->
+                            mapOf(
+                                "type" to t.name,
+                                "message" to AutoReplyTemplates.template(applicationContext, t),
+                                "isActive" to AutoReplyTemplates.isActive(applicationContext, t),
+                            )
+                        }
+                        result.success(list)
+                    }
+                    "saveAutoReply" -> {
+                        val typeName = call.argument<String>("type")
+                        val message = call.argument<String>("message")
+                        val isActive = call.argument<Boolean>("isActive")
+                        val type = typeName?.let {
+                            runCatching { AutoReplyTemplates.AutoReplyType.valueOf(it) }.getOrNull()
+                        }
+                        if (type == null || message == null || isActive == null) {
+                            result.error("BAD_ARGS", "type/message/isActive required", null)
+                        } else {
+                            AutoReplyTemplates.setMessage(applicationContext, type, message)
+                            AutoReplyTemplates.setActive(applicationContext, type, isActive)
+                            result.success(true)
+                        }
+                    }
+                    // ── W4: Authorized Senders (agent-managed allowlist) ──
+                    "getAuthorizedSenders" ->
+                        result.success(SessionBridge.getAuthorizedSenders(applicationContext).toList())
+                    "addAuthorizedSender" -> {
+                        val sender = call.argument<String>("sender")
+                        if (sender.isNullOrBlank()) result.error("BAD_ARGS", "sender is required", null)
+                        else result.success(SessionBridge.addAuthorizedSender(applicationContext, sender))
+                    }
+                    "removeAuthorizedSender" -> {
+                        val sender = call.argument<String>("sender")
+                        if (sender.isNullOrBlank()) result.error("BAD_ARGS", "sender is required", null)
+                        else { SessionBridge.removeAuthorizedSender(applicationContext, sender); result.success(true) }
+                    }
                     "saveAppState" -> {
                         val state = call.argument<String>("state")
                         if (state.isNullOrBlank()) {

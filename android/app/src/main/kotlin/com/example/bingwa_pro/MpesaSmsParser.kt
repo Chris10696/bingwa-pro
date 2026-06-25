@@ -74,6 +74,48 @@ object MpesaSmsParser {
         val cleaned = raw.replace(",", "")
         return cleaned.toDoubleOrNull()?.toInt() ?: 0
     }
+
+    // ── W4: Till extractor (Hybrid TillMessageExtractor, verbatim) ─────────────────────
+    private val RE_TILL_PHONE = Regex("""(\d{12})""")
+    private val RE_TILL_NAME = Regex("""from \d{12} (.+?)\. New""", RegexOption.IGNORE_CASE)
+
+    /** Parse a Till/Buy-Goods confirmation, or null if not dialable (no code / no 12-digit phone). */
+    fun parseTill(body: String): ParsedMpesa? {
+        val code = RE_CODE.find(body)?.groupValues?.getOrNull(1)
+        if (code.isNullOrBlank()) { Log.w(TAG, "parseTill: no code (^\\S+) — skipping"); return null }
+        val phone = RE_TILL_PHONE.find(body)?.groupValues?.getOrNull(0) ?: ""
+        if (phone.isBlank()) { Log.w(TAG, "parseTill: no \\d{12} phone — skipping"); return null }
+        val name = RE_TILL_NAME.find(body)?.groupValues?.getOrNull(1) ?: "Unknown"
+        val amount = extractAmount(body)
+        Log.d(TAG, "Parsed Till — code=$code amount=$amount phone=$phone name=$name")
+        return ParsedMpesa(code, phone, name, amount, body)
+    }
+
+    // ── W4: SiteLink extractor (Hybrid SiteLinkMessageExtractor, verbatim) ─────────────
+    // "BHSL <code> Confirmed … from <buyer> … for <beneficiary> … Ksh<amount>". The bundle is
+    // delivered to the "for" number, so that is the customer we dial (fall back to "from").
+    private val RE_SL_CODE = Regex("""BHSL\s+([A-Z0-9]+)\s+Confirmed""", RegexOption.IGNORE_CASE)
+    private val RE_SL_FOR = Regex("""for\s+(\d+)""", RegexOption.IGNORE_CASE)
+    private val RE_SL_FROM = Regex("""from\s+(\d+)""", RegexOption.IGNORE_CASE)
+
+    /** Parse a SiteLink (BHSL) confirmation, or null if not dialable. Inert until W5 (D-W4-1). */
+    fun parseSiteLink(body: String): ParsedMpesa? {
+        val code = RE_SL_CODE.find(body)?.groupValues?.getOrNull(1)
+        if (code.isNullOrBlank()) { Log.w(TAG, "parseSiteLink: no BHSL code — skipping"); return null }
+        val customer = RE_SL_FOR.find(body)?.groupValues?.getOrNull(1)
+            ?: RE_SL_FROM.find(body)?.groupValues?.getOrNull(1) ?: ""
+        if (customer.isBlank()) { Log.w(TAG, "parseSiteLink: no customer number — skipping"); return null }
+        val amount = extractAmount(body)
+        Log.d(TAG, "Parsed SiteLink — code=$code amount=$amount customer=$customer")
+        return ParsedMpesa(code, customer, "Unknown", amount, body)
+    }
+
+    /** Dispatch to the right extractor for a classified [type] (M-Pesa path unchanged). */
+    fun parseFor(type: SmsType, body: String): ParsedMpesa? = when (type) {
+        SmsType.MPESA -> parse(body)
+        SmsType.TILL -> parseTill(body)
+        SmsType.SITE_LINK -> parseSiteLink(body)
+    }
 }
 
 /**
@@ -88,3 +130,25 @@ data class ParsedMpesa(
     val amount: Int,
     val rawMessage: String,
 )
+
+/**
+ * W4 — SMS payment classification (Hybrid `SmsType`, verbatim patterns + order). Only the three
+ * payment-trigger types feed the auto-sale pipeline; classification iterates in this exact
+ * ordinal order and returns the FIRST match, so the specific patterns (SiteLink `^BHSL`, Till
+ * "received from <n>") win before the generic M-Pesa "received Ksh". Hybrid's non-payment types
+ * (recommendation timeout/expired, airtime balance, commission) match none of these → null →
+ * the receiver ignores them (each handled in its own wave). `matches` = `Regex(pattern,
+ * IGNORE_CASE).containsMatchIn(body)`, exactly as Hybrid's `SmsType.matches`.
+ */
+enum class SmsType(private val pattern: Regex) {
+    SITE_LINK(Regex("""^BHSL""", RegexOption.IGNORE_CASE)),
+    TILL(Regex("""received from \d{9,12}""", RegexOption.IGNORE_CASE)),
+    MPESA(Regex("""received Ksh\d+(\.\d{2})?""", RegexOption.IGNORE_CASE));
+
+    fun matches(body: String): Boolean = pattern.containsMatchIn(body)
+
+    companion object {
+        /** First matching type in ordinal order, or null. Mirrors Hybrid's classify. */
+        fun classify(body: String): SmsType? = entries.firstOrNull { it.matches(body) }
+    }
+}

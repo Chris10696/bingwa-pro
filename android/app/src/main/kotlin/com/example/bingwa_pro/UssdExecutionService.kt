@@ -249,6 +249,12 @@ class UssdExecutionService : Service() {
             // refinement — not fabricated here.
             patchStatusBestEffort(req, "SUCCESS", null, response, req.mpesaCode)
             sendAutoReply(req, "SUCCESS")
+            // W4-batch-4: auto-save the paying customer to the phonebook (no-op for renewals
+            // and pay-with-airtime — both carry a blank customerPhone — and when the toggle
+            // is off / the contact already exists / WRITE_CONTACTS isn't granted).
+            if (!req.isRecurringRenewal) {
+                ContactSaver.saveIfEnabled(applicationContext, req.customerPhone, req.customerName)
+            }
             if (req.isRecurringRenewal) maybeScheduleNext(req)
             return
         }

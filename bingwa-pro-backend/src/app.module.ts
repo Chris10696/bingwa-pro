@@ -11,6 +11,7 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { OffersModule } from './offers/offers.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { CouponsModule } from './coupons/coupons.module';
+import { CustomersModule } from './customers/customers.module';
 import { UssdModule } from './ussd/ussd.module';
 import { MpesaModule } from './mpesa/mpesa.module';
 import { HttpModule } from '@nestjs/axios';
@@ -41,6 +42,7 @@ import { HttpModule } from '@nestjs/axios';
     OffersModule,
     SubscriptionsModule,
     CouponsModule,
+    CustomersModule,
     UssdModule,
     MpesaModule,
   ],

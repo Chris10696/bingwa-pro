@@ -3,6 +3,7 @@
 // (3-col) + green dial button. Backend-first via quickDialNotifier.dial();
 // the dial now runs through the REAL pipeline (W3.L) and the result is shown
 // in a UssdResponseDialog (Hybrid parity) instead of a fire-and-forget snackbar.
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +11,8 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
 import '../../../../core/widgets/loading_indicator.dart';
 import '../../../../shared/models/offer_model.dart';
+import '../../../../shared/models/customer_model.dart';
+import '../../../../shared/repositories/customer_repository.dart';
 import '../../../offers/presentation/providers/offer_provider.dart';
 import '../providers/quick_dial_provider.dart';
 class QuickDialScreen extends ConsumerStatefulWidget {
@@ -19,7 +22,12 @@ class QuickDialScreen extends ConsumerStatefulWidget {
 }
 class _QuickDialScreenState extends ConsumerState<QuickDialScreen> {
   final _phoneController = TextEditingController();
+  final _phoneFocus = FocusNode();
   bool _resultDialogOpen = false;
+  // W4-3c: saved-customer autocomplete suggestions for the phone field.
+  List<Customer> _suggestions = [];
+  Timer? _searchDebounce;
+  String _lastQuery = '';
   @override
   void initState() {
     super.initState();
@@ -30,8 +38,44 @@ class _QuickDialScreenState extends ConsumerState<QuickDialScreen> {
   }
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _phoneFocus.dispose();
     _phoneController.dispose();
     super.dispose();
+  }
+
+  // W4-3c — debounced saved-customer lookup. The phone field is digit-only, so we search by
+  // the typed digits and suggest matching saved customers (name + phone). Tapping one fills
+  // the field. "Latest query wins" guards against out-of-order responses.
+  void _onPhoneChanged(String value, QuickDialNotifier notifier) {
+    notifier.setCustomerPhone(value);
+    _searchDebounce?.cancel();
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length < 3) {
+      if (_suggestions.isNotEmpty) setState(() => _suggestions = []);
+      return;
+    }
+    _searchDebounce =
+        Timer(const Duration(milliseconds: 300), () => _searchCustomers(digits));
+  }
+
+  Future<void> _searchCustomers(String query) async {
+    _lastQuery = query;
+    try {
+      final results =
+          await ref.read(customerRepositoryProvider).searchCustomers(query);
+      if (!mounted || _lastQuery != query) return;
+      setState(() => _suggestions = results.take(5).toList());
+    } catch (_) {
+      if (mounted) setState(() => _suggestions = []);
+    }
+  }
+
+  void _pickCustomer(Customer c, QuickDialNotifier notifier) {
+    _phoneController.text = c.phone;
+    notifier.setCustomerPhone(c.phone);
+    setState(() => _suggestions = []);
+    _phoneFocus.unfocus();
   }
   @override
   Widget build(BuildContext context) {
@@ -98,19 +142,47 @@ class _QuickDialScreenState extends ConsumerState<QuickDialScreen> {
   Widget _buildPhoneField(QuickDialNotifier notifier) {
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: TextField(
-        controller: _phoneController,
-        keyboardType: TextInputType.phone,
-        inputFormatters: [
-          FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _phoneController,
+            focusNode: _phoneFocus,
+            keyboardType: TextInputType.phone,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
+            ],
+            onChanged: (v) => _onPhoneChanged(v, notifier),
+            decoration: const InputDecoration(
+              labelText: 'Customer Phone',
+              hintText: '07XX XXX XXX',
+              prefixIcon: Icon(Icons.person_outline, color: Color(0xFF00C853)),
+              border: OutlineInputBorder(),
+            ),
+          ),
+          if (_suggestions.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(top: 4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: _suggestions
+                    .map((c) => ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.person,
+                              color: Color(0xFF00C853), size: 20),
+                          title: Text(c.name.isEmpty ? c.phone : c.name),
+                          subtitle: c.name.isEmpty ? null : Text(c.phone),
+                          onTap: () => _pickCustomer(c, notifier),
+                        ))
+                    .toList(),
+              ),
+            ),
         ],
-        onChanged: notifier.setCustomerPhone,
-        decoration: const InputDecoration(
-          labelText: 'Customer Phone',
-          hintText: '07XX XXX XXX',
-          prefixIcon: Icon(Icons.person_outline, color: Color(0xFF00C853)),
-          border: OutlineInputBorder(),
-        ),
       ),
     );
   }

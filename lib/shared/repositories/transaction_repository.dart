@@ -79,6 +79,26 @@ class TransactionRepository {
     );
   }
 
+  // W5.A — agent commission summary (this week total + today + last-7-days breakdown).
+  // GET /transactions/commission → { total, today, daily: [{date, amount}] }.
+  Future<({double total, double today, List<({String date, double amount})> daily})>
+      getCommissionSummary() async {
+    final response = await _dio.get('/transactions/commission');
+    final data = (response.data as Map).cast<String, dynamic>();
+    final daily = ((data['daily'] as List<dynamic>?) ?? const []).map((e) {
+      final m = (e as Map).cast<String, dynamic>();
+      return (
+        date: (m['date'] ?? '').toString(),
+        amount: (m['amount'] as num?)?.toDouble() ?? 0.0,
+      );
+    }).toList();
+    return (
+      total: (data['total'] as num?)?.toDouble() ?? 0.0,
+      today: (data['today'] as num?)?.toDouble() ?? 0.0,
+      daily: daily,
+    );
+  }
+
   Future<TransactionListResponse> getTransactionHistory(
     TransactionFilter filter,
   ) async {

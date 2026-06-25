@@ -607,12 +607,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               Expanded(
                 child: _buildStatCard(
                   'Commission',
-                  Formatters.formatCurrency(state.stats?.todayCommission ?? 0),
+                  Formatters.formatCurrency(
+                    ref.watch(commissionSummaryProvider).valueOrNull?.today ??
+                        state.stats?.todayCommission ??
+                        0,
+                  ),
                   Icons.attach_money,
                   Colors.orange,
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          // W5.A — Hybrid's "This week's commission" figure (from /transactions/commission).
+          Text(
+            "This week's commission: "
+            '${Formatters.formatCurrency(ref.watch(commissionSummaryProvider).valueOrNull?.total ?? 0)}',
+            style: const TextStyle(
+                fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w500),
           ),
         ],
       ),
@@ -1248,10 +1260,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           ],
         ),
       );
-  // Performance chart — unchanged (uses placeholder data; W5 wires real backend data)
+  // W5.B — "This week's commission" graph (Hybrid StatisticsGraph). Real data from
+  // GET /transactions/commission (last 7 days, oldest→newest); replaces the W2 placeholder.
   Widget _buildPerformanceChart(DashboardState state) {
-    final weekData = [12000.0, 15000.0, 8000.0, 22000.0, 18000.0, 25000.0, 20000.0];
-    final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final summary = ref.watch(commissionSummaryProvider).valueOrNull;
+    final daily = summary?.daily ?? const [];
+    final amounts = daily.map((d) => d.amount).toList();
+    final labels = daily.map((d) => _weekdayLabel(d.date)).toList();
+    final total = summary?.total ?? 0;
+    final maxAmount =
+        amounts.isEmpty ? 0.0 : amounts.reduce((a, b) => a > b ? a : b);
     return Container(
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
@@ -1261,94 +1279,90 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Weekly Performance',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              DropdownButton<String>(
-                value: state.selectedPeriod,
-                items: const [
-                  DropdownMenuItem(value: 'TODAY', child: Text('Today')),
-                  DropdownMenuItem(value: 'WEEK', child: Text('This Week')),
-                  DropdownMenuItem(value: 'MONTH', child: Text('This Month')),
-                ],
-                onChanged: (v) {
-                  if (v != null) {
-                    ref
-                        .read(dashboardNotifierProvider.notifier)
-                        .changePeriod(v);
-                  }
-                },
-              ),
-            ],
+          Text(
+            "This week's commission (${Formatters.formatCurrency(total)})",
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 10),
           SizedBox(
             height: 150,
-            child: LineChart(
-              LineChartData(
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: true,
-                  horizontalInterval: 5000,
-                  verticalInterval: 1,
-                ),
-                titlesData: FlTitlesData(
-                  show: true,
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      getTitlesWidget: (value, meta) {
-                        final i = value.toInt();
-                        return i >= 0 && i < days.length
-                            ? Text(days[i])
-                            : const Text('');
-                      },
+            child: (amounts.isEmpty || maxAmount <= 0)
+                ? const Center(
+                    child: Text('No commission yet this week',
+                        style: TextStyle(color: Colors.grey)),
+                  )
+                : LineChart(
+                    LineChartData(
+                      gridData: const FlGridData(
+                          show: true, drawVerticalLine: false),
+                      titlesData: FlTitlesData(
+                        show: true,
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            getTitlesWidget: (value, meta) {
+                              final i = value.toInt();
+                              return i >= 0 && i < labels.length
+                                  ? Text(labels[i],
+                                      style: const TextStyle(fontSize: 10))
+                                  : const Text('');
+                            },
+                          ),
+                        ),
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 36,
+                            getTitlesWidget: (value, meta) => Text(
+                                value.toInt().toString(),
+                                style: const TextStyle(fontSize: 10)),
+                          ),
+                        ),
+                        topTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false)),
+                      ),
+                      borderData: FlBorderData(
+                        show: true,
+                        border: Border.all(color: Colors.grey[300]!),
+                      ),
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: amounts
+                              .asMap()
+                              .entries
+                              .map((e) => FlSpot(e.key.toDouble(), e.value))
+                              .toList(),
+                          isCurved: true,
+                          color: const Color(0xFF00C853),
+                          barWidth: 3,
+                          belowBarData: BarAreaData(
+                            show: true,
+                            color:
+                                const Color(0xFF00C853).withValues(alpha: 0.1),
+                          ),
+                          dotData: const FlDotData(show: true),
+                        ),
+                      ],
+                      minY: 0,
+                      maxY: maxAmount * 1.2,
                     ),
                   ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      getTitlesWidget: (value, meta) =>
-                          Text('${(value / 1000).toInt()}k'),
-                    ),
-                  ),
-                  topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                ),
-                borderData: FlBorderData(
-                  show: true,
-                  border: Border.all(color: Colors.grey[300]!),
-                ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: weekData
-                        .asMap()
-                        .entries
-                        .map((e) => FlSpot(e.key.toDouble(), e.value))
-                        .toList(),
-                    isCurved: true,
-                    color: const Color(0xFF00C853),
-                    barWidth: 3,
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: const Color(0xFF00C853).withValues(alpha: 0.1),
-                    ),
-                    dotData: const FlDotData(show: false),
-                  ),
-                ],
-                minY: 0,
-              ),
-            ),
           ),
         ],
       ),
     );
+  }
+
+  // Weekday short-label (Mon…Sun) for a 'yyyy-MM-dd' commission-graph date.
+  String _weekdayLabel(String yyyyMmDd) {
+    try {
+      const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return names[DateTime.parse(yyyyMmDd).weekday - 1];
+    } catch (_) {
+      return '';
+    }
   }
   Widget _buildBottomNavigation() {
     return BottomNavigationBar(

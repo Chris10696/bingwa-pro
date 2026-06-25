@@ -3,6 +3,7 @@
 //   - ussdTemplate → ussdCode (D-W2-F)
 //   - dropped validityLabel (D-W2-3), categoryId + OfferCategory (D-W2-1)
 //   - added type (OfferType enum) + 8 Hybrid retry/reschedule fields (Q-W2-1)
+// W5.A: re-added commissionRate (agent commission % of the sale).
 // OfferType display labels: NONE→"All", DATA→"Data", VOICE→"Minutes", SMS→"SMS".
 
 enum OfferType {
@@ -64,6 +65,8 @@ class Offer {
   final OfferType type;
   final bool isActive;
   final String agentId;
+  // W5.A — agent commission as a PERCENT of the sale (0–100); 0 = no commission.
+  final double commissionRate;
 
   // Hybrid retry/reschedule config (Q-W2-1, data layer only in W2).
   final bool autoReschedule;
@@ -86,6 +89,7 @@ class Offer {
     required this.type,
     required this.isActive,
     required this.agentId,
+    this.commissionRate = 0,
     this.autoReschedule = false,
     this.autoRescheduleRunTime,
     this.autoRetry = false,
@@ -107,6 +111,7 @@ class Offer {
       type: OfferType.fromString(json['type'] as String? ?? 'DATA'),
       isActive: json['isActive'] as bool? ?? true,
       agentId: json['agentId'] as String,
+      commissionRate: (json['commissionRate'] as num?)?.toDouble() ?? 0,
       autoReschedule: json['autoReschedule'] as bool? ?? false,
       autoRescheduleRunTime: json['autoRescheduleRunTime'] as String?,
       autoRetry: json['autoRetry'] as bool? ?? false,
@@ -130,6 +135,7 @@ class Offer {
         'type': type.toBackendValue(),
         'isActive': isActive,
         'agentId': agentId,
+        'commissionRate': commissionRate,
         'autoReschedule': autoReschedule,
         'autoRescheduleRunTime': autoRescheduleRunTime,
         'autoRetry': autoRetry,
@@ -150,6 +156,7 @@ class Offer {
     OfferType? type,
     bool? isActive,
     String? agentId,
+    double? commissionRate,
     bool? autoReschedule,
     String? autoRescheduleRunTime,
     bool? autoRetry,
@@ -169,6 +176,7 @@ class Offer {
       type: type ?? this.type,
       isActive: isActive ?? this.isActive,
       agentId: agentId ?? this.agentId,
+      commissionRate: commissionRate ?? this.commissionRate,
       autoReschedule: autoReschedule ?? this.autoReschedule,
       autoRescheduleRunTime:
           autoRescheduleRunTime ?? this.autoRescheduleRunTime,

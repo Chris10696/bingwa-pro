@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:line_icons/line_icons.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
 import '../../../../core/security/secure_storage_manager.dart';
 import '../../../../core/services/session_bridge_service.dart';
@@ -12,6 +13,8 @@ import '../../../wallet/presentation/providers/wallet_provider.dart';
 import '../../../../shared/models/wallet_model.dart' show ProcessingMode;
 import 'accessibility_required_screen.dart';
 import 'sim_setup_screen.dart';
+import '../../../authorized_senders/presentation/screens/authorized_senders_screen.dart';
+import '../../../customers/presentation/screens/blacklist_screen.dart';
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
   @override
@@ -22,6 +25,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _notificationsEnabled = true;
   bool _transactionSounds = true;
   String _language = 'English';
+  // W4 — message-processing toggles (mirrored to native; gate the SMS auto-processor).
+  // Native defaults: M-Pesa ON, Till ON, SiteLink OFF (inert until W5).
+  bool _processMpesa = true;
+  bool _processTill = true;
+  bool _processSiteLink = false;
+  bool _autoSaveContacts = false;
   @override
   void initState() {
     super.initState();
@@ -30,9 +39,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _loadSettings() async {
     final biometricEnabled = await SecureStorageManager.getBiometricEnabled(false);
 
+    // W4: current message-processing toggle state, mirrored from native.
+    final bridge = ref.read(sessionBridgeServiceProvider);
+    final mpesa = await bridge.getProcessMpesa();
+    final till = await bridge.getProcessTill();
+    final siteLink = await bridge.getProcessSiteLink();
+    final autoSave = await bridge.getAutoSaveContacts();
+
     if (mounted) {
       setState(() {
         _biometricEnabled = biometricEnabled;
+        _processMpesa = mpesa;
+        _processTill = till;
+        _processSiteLink = siteLink;
+        _autoSaveContacts = autoSave;
       });
     }
     // W2.4D: ensure wallet balance is loaded so Processing Mode reflects state.
@@ -41,9 +61,58 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await ref.read(walletNotifierProvider.notifier).loadWalletData();
     await _reconcileAccessibilityMode();
   }
-  void _comingSoon(String feature) {
+
+  /// W4: flip a message-processing toggle (optimistic) and mirror it to native, where
+  /// the SMS receiver reads it (AND-ed with AppState==running) per incoming SMS type.
+  Future<void> _setProcessFlag(String which, bool value) async {
+    setState(() {
+      switch (which) {
+        case 'mpesa':
+          _processMpesa = value;
+          break;
+        case 'till':
+          _processTill = value;
+          break;
+        case 'sitelink':
+          _processSiteLink = value;
+          break;
+      }
+    });
+    final bridge = ref.read(sessionBridgeServiceProvider);
+    switch (which) {
+      case 'mpesa':
+        await bridge.saveProcessMpesa(value);
+        break;
+      case 'till':
+        await bridge.saveProcessTill(value);
+        break;
+      case 'sitelink':
+        await bridge.saveProcessSiteLink(value);
+        break;
+    }
+  }
+
+  /// W4-batch-4: toggle Auto-Save Contacts. Enabling first requests the Contacts permission;
+  /// only persists ON if granted (native skips the write without WRITE_CONTACTS anyway).
+  Future<void> _setAutoSaveContacts(bool value) async {
+    final bridge = ref.read(sessionBridgeServiceProvider);
+    if (!value) {
+      setState(() => _autoSaveContacts = false);
+      await bridge.saveAutoSaveContacts(false);
+      return;
+    }
+    final status = await Permission.contacts.request();
+    if (!mounted) return;
+    final granted = status.isGranted;
+    setState(() => _autoSaveContacts = granted);
+    await bridge.saveAutoSaveContacts(granted);
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$feature is coming in a later update')),
+      SnackBar(
+        content:
+            Text(granted ? 'Contacts auto-save enabled' : 'Permission denied'),
+        backgroundColor: granted ? const Color(0xFF00C853) : Colors.orange,
+      ),
     );
   }
 
@@ -170,10 +239,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
             _buildSettingsItem(
-              icon: Icons.sms,
-              title: 'Message Processing',
-              subtitle: 'Coming in a later update',
-              onTap: () => _comingSoon('Message Processing'),
+              icon: Icons.chat_bubble_outline,
+              title: 'Auto-Reply Messages',
+              subtitle: 'Edit the SMS replies sent to customers',
+              onTap: () => context.push('/auto-reply'),
             ),
             _buildSettingsItem(
               icon: Icons.people_outline,
@@ -186,6 +255,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               title: 'Transaction History',
               subtitle: 'View all your transactions',
               onTap: () => context.push('/transaction-history'),
+            ),
+          ]),
+          const SizedBox(height: 20),
+          // W4: Message Processing — which incoming SMS the auto-processor acts on.
+          _buildSectionHeader('Message Processing'),
+          _buildSettingsCard([
+            _buildSwitchItem(
+              icon: Icons.sms,
+              title: 'Process M-Pesa Messages',
+              subtitle: 'Auto-process M-Pesa payment confirmations',
+              value: _processMpesa,
+              onChanged: (v) => _setProcessFlag('mpesa', v),
+            ),
+            _buildSwitchItem(
+              icon: Icons.storefront,
+              title: 'Process Till Messages',
+              subtitle: 'Auto-process Till / Buy-Goods confirmations',
+              value: _processTill,
+              onChanged: (v) => _setProcessFlag('till', v),
+            ),
+            _buildSwitchItem(
+              icon: Icons.link,
+              title: 'Process SiteLink Messages',
+              subtitle: 'Auto-process SiteLink online-store sales',
+              value: _processSiteLink,
+              onChanged: (v) => _setProcessFlag('sitelink', v),
+            ),
+            _buildSettingsItem(
+              icon: Icons.verified_user_outlined,
+              title: 'Authorized Senders',
+              subtitle: 'Messages from these senders will be processed too',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AuthorizedSendersScreen()),
+              ),
+            ),
+            _buildSwitchItem(
+              icon: Icons.contact_phone_outlined,
+              title: 'Auto-Save Contacts',
+              subtitle: 'Save paying customers to your phonebook',
+              value: _autoSaveContacts,
+              onChanged: (v) => _setAutoSaveContacts(v),
+            ),
+            _buildSettingsItem(
+              icon: Icons.block,
+              title: 'BlackList',
+              subtitle: 'Blacklisted customers will not be recommended offers',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const BlackListScreen()),
+              ),
             ),
           ]),
           const SizedBox(height: 20),

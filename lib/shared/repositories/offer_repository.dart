@@ -52,6 +52,7 @@ class OfferRepository {
     required int price,
     required OfferType type,
     bool? isActive,
+    double? commissionRate,
   }) async {
     try {
       final body = {
@@ -60,6 +61,7 @@ class OfferRepository {
         'price': price,
         'type': type.toBackendValue(),
         if (isActive != null) 'isActive': isActive,
+        if (commissionRate != null) 'commissionRate': commissionRate,
       };
       final response = await _dio.post(ApiConstants.offers, data: body);
       return Offer.fromJson(response.data as Map<String, dynamic>);
@@ -83,6 +85,7 @@ class OfferRepository {
     int? price,
     OfferType? type,
     bool? isActive,
+    double? commissionRate,
     // W3.H Offer Settings fields:
     bool? autoReschedule,
     String? autoRescheduleRunTime,
@@ -99,6 +102,7 @@ class OfferRepository {
       if (price != null) body['price'] = price;
       if (type != null) body['type'] = type.toBackendValue();
       if (isActive != null) body['isActive'] = isActive;
+      if (commissionRate != null) body['commissionRate'] = commissionRate;
       if (autoReschedule != null) body['autoReschedule'] = autoReschedule;
       if (autoRescheduleRunTime != null) {
         body['autoRescheduleRunTime'] = autoRescheduleRunTime;

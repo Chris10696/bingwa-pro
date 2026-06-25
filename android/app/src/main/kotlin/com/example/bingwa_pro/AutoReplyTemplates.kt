@@ -79,6 +79,16 @@ object AutoReplyTemplates {
     fun isActive(context: Context, type: AutoReplyType): Boolean =
         prefs(context).getBoolean(keyActive(type), true)
 
+    /** W4-batch-5 — persist an agent edit to a type's message (the edit-UI writes this). */
+    fun setMessage(context: Context, type: AutoReplyType, message: String) {
+        prefs(context).edit().putString(keyMessage(type), message).apply()
+    }
+
+    /** W4-batch-5 — enable/disable a type's auto-reply (the resolve() send-gate reads this). */
+    fun setActive(context: Context, type: AutoReplyType, active: Boolean) {
+        prefs(context).edit().putBoolean(keyActive(type), active).apply()
+    }
+
     /**
      * Resolve a template for [type] with placeholder substitution, or null if the type's
      * reply is inactive or has no template. Mirrors Hybrid's replacePlaceholders.

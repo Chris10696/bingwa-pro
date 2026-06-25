@@ -50,6 +50,7 @@ import { Wallet } from '../wallets/entities/wallet.entity';
 import { Offer } from '../offers/entities/offer.entity';
 import { SubscriptionPlansService } from '../subscriptions/subscription-plans.service';
 import { SubscriptionPackagesService } from '../subscriptions/subscription-packages.service';
+import { CustomersService } from '../customers/customers.service';
 // Terminal statuses — set completedAt when transitioning to one of these.
 const TERMINAL_STATUSES: ReadonlySet<TransactionStatus> = new Set([
   TransactionStatus.SUCCESS,
@@ -62,7 +63,7 @@ const TERMINAL_STATUSES: ReadonlySet<TransactionStatus> = new Set([
 // transaction so the device fires the correct auto-reply via W3.M.
 // (Kept as a string union here to avoid a circular import with the enums
 // module; the device side has the full enum.)
-export type AutoReplyHint = 'OFFER_UNAVAILABLE' | null;
+export type AutoReplyHint = 'OFFER_UNAVAILABLE' | 'CUSTOMER_BLOCKED' | null;
 export interface SmsCreateResult {
   transaction: Transaction;
   autoReplyType: AutoReplyHint;
@@ -83,6 +84,7 @@ export class TransactionsService {
     private offersRepository: Repository<Offer>,
     private subscriptionPlansService: SubscriptionPlansService,
     private subscriptionPackagesService: SubscriptionPackagesService,
+    private customersService: CustomersService,
   ) {}
   async getTransactionHistory(
     agentId: string,
@@ -311,6 +313,7 @@ export class TransactionsService {
       mpesaTransactionId: string;
       amount: number;
       customerPhone: string;
+      customerName?: string;
       mpesaMessage?: string;
     },
   ): Promise<SmsCreateResult> {
@@ -332,6 +335,52 @@ export class TransactionsService {
         existingTransactionId: existing.id,
         status: existing.status,
       });
+    }
+    // 2b. Customer get-or-create + blacklist gate (W4-batch-3, D-W4-4). A blacklisted
+    // customer's payment is recorded BLOCKED with no debit and no dial; the device fires
+    // the CUSTOMER_BLOCKED auto-reply (Hybrid CustomerBlackListedException → BLOCKED branch).
+    const customer = await this.customersService.getOrCreate(
+      agentId,
+      data.customerPhone,
+      data.customerName,
+    );
+    if (customer.isBlackListed) {
+      const reference = `BLK${Date.now()}${Math.floor(Math.random() * 1000)}`;
+      const blocked = this.transactionsRepository.create({
+        agentId,
+        reference,
+        type: TransactionType.MPESA,
+        status: TransactionStatus.BLOCKED,
+        amount: Math.round(data.amount),
+        customerPhone: data.customerPhone,
+        mpesaTransactionId: data.mpesaTransactionId,
+        mpesaMessage: data.mpesaMessage ?? null,
+        errorMessage: 'Customer is blacklisted',
+      });
+      let savedBlocked: Transaction;
+      try {
+        savedBlocked = await this.transactionsRepository.save(blocked);
+      } catch (err: any) {
+        if (err?.code === '23505') {
+          const ex = await this.transactionsRepository.findOne({
+            where: { mpesaTransactionId: data.mpesaTransactionId, agentId },
+          });
+          throw new ConflictException({
+            message: 'Payment already recorded',
+            existingTransactionId: ex?.id,
+            status: ex?.status,
+          });
+        }
+        throw err;
+      }
+      this.logger.log(
+        `BLOCKED — blacklisted customer ${data.customerPhone} agent=${agentId} txn=${savedBlocked.id}`,
+      );
+      return {
+        transaction: savedBlocked,
+        autoReplyType: 'CUSTOMER_BLOCKED',
+        shouldDial: false,
+      };
     }
     // 3. Offer match (whole shillings).
     const offer = await this.offersRepository.findOne({
@@ -413,6 +462,9 @@ export class TransactionsService {
       }
       throw err;
     }
+
+    // W4-batch-3: stamp the customer's last-purchase time (their payment just arrived).
+    await this.customersService.recordPurchase(agentId, data.customerPhone);
 
     // Dial-time debit (D-W3-17, Hybrid parity). The dial happens device-side
     // immediately after this response; debiting here is the closest backend
@@ -605,7 +657,71 @@ export class TransactionsService {
     if (TERMINAL_STATUSES.has(status) && !transaction.completedAt) {
       transaction.completedAt = new Date();
     }
+    // W5.A — set the agent commission on a successful sale (Hybrid AgentCommissionHandler).
+    // commission = round(amount × offer.commissionRate / 100); computed once, only when unset.
+    if (
+      status === TransactionStatus.SUCCESS &&
+      transaction.offerId &&
+      (!transaction.commission || Number(transaction.commission) === 0)
+    ) {
+      const offer = await this.offersRepository.findOne({
+        where: { id: transaction.offerId },
+      });
+      const rate = offer ? Number(offer.commissionRate) || 0 : 0;
+      if (rate > 0) {
+        transaction.commission =
+          Math.round(Number(transaction.amount) * rate) / 100;
+      }
+    }
     return this.transactionsRepository.save(transaction);
+  }
+
+  /**
+   * W5.A — agent commission summary (Hybrid's "this week's commission" + the weekly graph).
+   * Derived from transaction.commission (no separate agent_commissions table — Pro's
+   * derive-from-transactions model). Returns the last 7 calendar days (oldest→newest) plus
+   * the week total and today's figure.
+   */
+  async getCommissionSummary(agentId: string): Promise<{
+    total: number;
+    today: number;
+    daily: { date: string; amount: number }[];
+  }> {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - 6); // last 7 days incl. today
+    const txns = await this.transactionsRepository.find({
+      where: { agentId, status: TransactionStatus.SUCCESS },
+    });
+    const byDay = new Map<string, number>();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      byDay.set(this.dayKey(d), 0);
+    }
+    const todayKey = this.dayKey(new Date());
+    let total = 0;
+    let today = 0;
+    for (const t of txns) {
+      const c = Number(t.commission) || 0;
+      if (c <= 0) continue;
+      const key = this.dayKey(new Date(t.completedAt ?? t.createdAt));
+      if (byDay.has(key)) {
+        byDay.set(key, byDay.get(key)! + c);
+        total += c;
+        if (key === todayKey) today += c;
+      }
+    }
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const daily = Array.from(byDay.entries()).map(([date, amount]) => ({
+      date,
+      amount: round2(amount),
+    }));
+    return { total: round2(total), today: round2(today), daily };
+  }
+
+  private dayKey(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
   /**

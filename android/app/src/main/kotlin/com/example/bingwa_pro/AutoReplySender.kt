@@ -45,7 +45,7 @@ object AutoReplySender {
             "FAILED_ALREADY_RECOMMENDED" -> AutoReplyTemplates.AutoReplyType.ALREADY_RECOMMENDED
             "FAILED" -> AutoReplyTemplates.AutoReplyType.FAILED
             "PAUSED" -> AutoReplyTemplates.AutoReplyType.APP_PAUSED
-            "BLOCKED" -> AutoReplyTemplates.AutoReplyType.CUSTOMER_BLOCKED
+            "BLOCKED", "CUSTOMER_BLOCKED" -> AutoReplyTemplates.AutoReplyType.CUSTOMER_BLOCKED
             "UNMATCHED" -> AutoReplyTemplates.AutoReplyType.OFFER_UNAVAILABLE
             else -> null // RESCHEDULED / PROCESSING / SCHEDULED → no auto-reply
         }
