@@ -1,6 +1,6 @@
 class AppConstants {
   // App Info
-  static const String appName = 'Bingwa Pro';
+  static const String appName = 'Bingwa Nexus';
   static const String appVersion = '1.0.0';
   
   // Session Management

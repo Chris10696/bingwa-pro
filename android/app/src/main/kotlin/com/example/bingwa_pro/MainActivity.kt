@@ -31,6 +31,12 @@ class MainActivity : FlutterActivity() {
     //            (D-W3-19 Option B).
     private val SCHEDULER_CHANNEL = "bingwa_pro/scheduler"
     private val SESSION_CHANNEL   = "bingwa_pro/session"
+    // ─── W5.F.2: HybridConnect/Portal socket control ──────────────────────────
+    // Dart (W5.F.3's "Hybrid Portal" toggle) starts/stops the socket foreground
+    // service, passing the Connect ID it fetched from POST /hybrid-connect/generate.
+    private val SOCKET_CHANNEL    = "bingwa_pro/socket"
+    // ─── W5.H: in-app updater (download + install the APK) ────────────────────
+    private val UPDATE_CHANNEL    = "bingwa_pro/update"
     // ─── Test injection channel ──────────────────────────────────────────────
     // Used only during development. Flutter calls "injectTestPayment" with a
     // fake M-PESA message body so the entire SMS → parse → route-match → USSD
@@ -196,6 +202,79 @@ class MainActivity : FlutterActivity() {
                             result.success(true)
                         }
                     }
+                    // ── W4: Till / SiteLink processing toggles + getters (Settings load) ──
+                    "saveProcessTill" -> {
+                        val enabled = call.argument<Boolean>("enabled")
+                        if (enabled == null) result.error("BAD_ARGS", "enabled is required", null)
+                        else { SessionBridge.saveProcessTill(applicationContext, enabled); result.success(true) }
+                    }
+                    "saveProcessSiteLink" -> {
+                        val enabled = call.argument<Boolean>("enabled")
+                        if (enabled == null) result.error("BAD_ARGS", "enabled is required", null)
+                        else { SessionBridge.saveProcessSiteLink(applicationContext, enabled); result.success(true) }
+                    }
+                    "getProcessMpesa" -> result.success(SessionBridge.getProcessMpesa(applicationContext))
+                    "getProcessTill" -> result.success(SessionBridge.getProcessTill(applicationContext))
+                    "getProcessSiteLink" -> result.success(SessionBridge.getProcessSiteLink(applicationContext))
+                    // ── W4-batch-4: Auto-Save Contacts toggle ──
+                    "saveAutoSaveContacts" -> {
+                        val enabled = call.argument<Boolean>("enabled")
+                        if (enabled == null) result.error("BAD_ARGS", "enabled is required", null)
+                        else { SessionBridge.saveAutoSaveContacts(applicationContext, enabled); result.success(true) }
+                    }
+                    "getAutoSaveContacts" -> result.success(SessionBridge.getAutoSaveContacts(applicationContext))
+                    // ── W5.C/W5.D/W5.E: account-health mirror + EngageBot toggle + clock check ──
+                    "saveAccountHealthy" -> {
+                        val healthy = call.argument<Boolean>("healthy")
+                        if (healthy == null) result.error("BAD_ARGS", "healthy is required", null)
+                        else { SessionBridge.saveAccountHealthy(applicationContext, healthy); result.success(true) }
+                    }
+                    "saveEngageBot" -> {
+                        val enabled = call.argument<Boolean>("enabled")
+                        if (enabled == null) result.error("BAD_ARGS", "enabled is required", null)
+                        else { SessionBridge.saveEngageBot(applicationContext, enabled); result.success(true) }
+                    }
+                    "getEngageBot" -> result.success(SessionBridge.getEngageBot(applicationContext))
+                    "isAutoTimeEnabled" -> result.success(DeviceTimeCheck.isAutoTimeEnabled(applicationContext))
+                    // ── W4-batch-5: Auto-Reply template edit surface ──
+                    "getAutoReplies" -> {
+                        val list = AutoReplyTemplates.AutoReplyType.values().map { t ->
+                            mapOf(
+                                "type" to t.name,
+                                "message" to AutoReplyTemplates.template(applicationContext, t),
+                                "isActive" to AutoReplyTemplates.isActive(applicationContext, t),
+                            )
+                        }
+                        result.success(list)
+                    }
+                    "saveAutoReply" -> {
+                        val typeName = call.argument<String>("type")
+                        val message = call.argument<String>("message")
+                        val isActive = call.argument<Boolean>("isActive")
+                        val type = typeName?.let {
+                            runCatching { AutoReplyTemplates.AutoReplyType.valueOf(it) }.getOrNull()
+                        }
+                        if (type == null || message == null || isActive == null) {
+                            result.error("BAD_ARGS", "type/message/isActive required", null)
+                        } else {
+                            AutoReplyTemplates.setMessage(applicationContext, type, message)
+                            AutoReplyTemplates.setActive(applicationContext, type, isActive)
+                            result.success(true)
+                        }
+                    }
+                    // ── W4: Authorized Senders (agent-managed allowlist) ──
+                    "getAuthorizedSenders" ->
+                        result.success(SessionBridge.getAuthorizedSenders(applicationContext).toList())
+                    "addAuthorizedSender" -> {
+                        val sender = call.argument<String>("sender")
+                        if (sender.isNullOrBlank()) result.error("BAD_ARGS", "sender is required", null)
+                        else result.success(SessionBridge.addAuthorizedSender(applicationContext, sender))
+                    }
+                    "removeAuthorizedSender" -> {
+                        val sender = call.argument<String>("sender")
+                        if (sender.isNullOrBlank()) result.error("BAD_ARGS", "sender is required", null)
+                        else { SessionBridge.removeAuthorizedSender(applicationContext, sender); result.success(true) }
+                    }
                     "saveAppState" -> {
                         val state = call.argument<String>("state")
                         if (state.isNullOrBlank()) {
@@ -282,6 +361,55 @@ class MainActivity : FlutterActivity() {
                                 UssdExecutionService.enqueue(applicationContext, request)
                                 result.success(true)
                             }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // ── Socket Control Channel (W5.F.2) ─────────────────────────────────
+        // Starts/stops SocketForegroundService for HybridConnect/Portal. The Connect
+        // ID comes from Dart (fetched via the backend); native just owns the socket.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SOCKET_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "startSocket" -> {
+                        val connectId = call.argument<String>("connectId")
+                        if (connectId.isNullOrBlank()) {
+                            result.error("BAD_ARGS", "connectId is required", null)
+                        } else {
+                            SocketForegroundService.start(applicationContext, connectId)
+                            result.success(true)
+                        }
+                    }
+                    "stopSocket" -> {
+                        SocketForegroundService.stop(applicationContext)
+                        result.success(true)
+                    }
+                    "isSocketConnected" -> result.success(SocketService.isConnected())
+                    else -> result.notImplemented()
+                }
+            }
+
+        // ── App Update Channel (W5.H) ───────────────────────────────────────
+        // Dart's CheckForUpdates screen gates on the install permission then asks
+        // native to download + install the APK the version endpoint advertises.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, UPDATE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "canInstallUnknownSources" ->
+                        result.success(AppUpdateInstaller.canInstallUnknownSources(applicationContext))
+                    "openInstallSettings" -> {
+                        AppUpdateInstaller.openInstallSettings(this)
+                        result.success(true)
+                    }
+                    "downloadAndInstall" -> {
+                        val apkUrl = call.argument<String>("apkUrl")
+                        if (apkUrl.isNullOrBlank()) {
+                            result.error("BAD_ARGS", "apkUrl is required", null)
+                        } else {
+                            AppUpdateInstaller.downloadAndInstall(applicationContext, apkUrl)
+                            result.success(true)
                         }
                     }
                     else -> result.notImplemented()
@@ -463,11 +591,11 @@ class MainActivity : FlutterActivity() {
                 .filter  { it.second == PackageManager.PERMISSION_GRANTED }
                 .map     { it.first }
             Log.d(TAG, "Granted permissions: ${granted.joinToString()}")
-            Toast.makeText(this, "Permissions granted. Bingwa Pro is ready.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Permissions granted. Bingwa Nexus is ready.", Toast.LENGTH_LONG).show()
         }
     }
         /**
-    * Prompts the user to exempt Bingwa Pro from battery optimization. Without
+    * Prompts the user to exempt Bingwa Nexus from battery optimization. Without
     * this, Android's Doze mode will silently kill our foreground service after
     * the screen has been off for an extended period, breaking 24/7 USSD
     * monitoring.

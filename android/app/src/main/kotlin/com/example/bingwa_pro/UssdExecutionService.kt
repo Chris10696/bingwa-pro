@@ -158,6 +158,19 @@ class UssdExecutionService : Service() {
      * is inherent to Hybrid's own design.
      */
     private suspend fun processOne(req: DialRequest) {
+        // W5.C/W5.D — pre-dial gates (Hybrid DialUssdUseCase.invoke): a restricted account or an
+        // inaccurate device clock must NOT dial. Money-safe (no dial). The account-health stub is
+        // HEALTHY, so that gate is inert until a real standing policy ships.
+        if (!SessionBridge.getAccountHealthy(applicationContext)) {
+            Log.w(TAG, "Txn ${req.transactionId}: account not healthy — BLOCKED, not dialing")
+            patchStatusBestEffort(req, "BLOCKED", "Account access is restricted", null)
+            return
+        }
+        if (!DeviceTimeCheck.isAutoTimeEnabled(applicationContext)) {
+            Log.w(TAG, "Txn ${req.transactionId}: device auto-time OFF — not dialing")
+            patchStatusBestEffort(req, "FAILED", DeviceTimeCheck.INACCURATE_MESSAGE, null)
+            return
+        }
         val engine = UssdEngine(applicationContext, dryRun = false)
         val finalCode = engine.formatUssdCode(req.ussdTemplate, req.customerPhone, req.amount)
         // Missing/invalid code → FAILED "USSD code is missing" (Hybrid parity), no dial.
@@ -219,9 +232,13 @@ class UssdExecutionService : Service() {
         if (UssdResponseClassifier.isAlreadyRecommended(response)) {
             patchStatusBestEffort(req, "FAILED_ALREADY_RECOMMENDED", response, response)
             sendAutoReply(req, "FAILED_ALREADY_RECOMMENDED")
-            // AlreadyRecommendedChain reschedules iff offer.autoReschedule (W3 carries the
-            // flag; the next-day arm reuses the recurrence anchor).
-            if (offer?.autoReschedule == true) scheduleExternalRetryOrRenew(req, isRenewAnchor = true)
+            // AlreadyRecommendedChain reschedules iff offer.autoReschedule (W3 carries the flag).
+            // W5.E — gated by the EngageBot master toggle: only re-engage already-recommended
+            // offers for the next day when the agent has EngageBot ON.
+            if (offer?.autoReschedule == true &&
+                SessionBridge.getEngageBot(applicationContext)) {
+                scheduleExternalRetryOrRenew(req, isRenewAnchor = true)
+            }
             return
         }
 
@@ -249,6 +266,12 @@ class UssdExecutionService : Service() {
             // refinement — not fabricated here.
             patchStatusBestEffort(req, "SUCCESS", null, response, req.mpesaCode)
             sendAutoReply(req, "SUCCESS")
+            // W4-batch-4: auto-save the paying customer to the phonebook (no-op for renewals
+            // and pay-with-airtime — both carry a blank customerPhone — and when the toggle
+            // is off / the contact already exists / WRITE_CONTACTS isn't granted).
+            if (!req.isRecurringRenewal) {
+                ContactSaver.saveIfEnabled(applicationContext, req.customerPhone, req.customerName)
+            }
             if (req.isRecurringRenewal) maybeScheduleNext(req)
             return
         }
@@ -489,7 +512,7 @@ class UssdExecutionService : Service() {
             // primary background-activity-start exemption, this is the fallback surface.
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Bingwa Pro USSD Service",
+                "Bingwa Nexus USSD Service",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Processes scheduled USSD transactions"
@@ -519,7 +542,7 @@ class UssdExecutionService : Service() {
         }
         val fullScreen = PendingIntent.getActivity(this, 0, launch, piFlags)
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Bingwa Pro")
+            .setContentTitle("Bingwa Nexus")
             .setContentText("Processing transactions...")
             .setSmallIcon(android.R.drawable.ic_menu_edit)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

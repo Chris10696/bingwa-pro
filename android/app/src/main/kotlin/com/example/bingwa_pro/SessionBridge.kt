@@ -37,6 +37,20 @@ object SessionBridge {
     private const val KEY_PROCESSING_MODE = "processing_mode"
     private const val KEY_APP_STATE = "app_state"
     private const val KEY_PROCESS_MPESA = "process_mpesa_messages"
+    // W4 — per-type message-processing toggles (Hybrid AppSetting PROCESS_TILL/SITE_LINK_MESSAGES).
+    private const val KEY_PROCESS_TILL = "process_till_messages"
+    private const val KEY_PROCESS_SITE_LINK = "process_site_link_messages"
+    // W4 — agent-managed Authorized Senders (Hybrid authorized_senders table → on-device set).
+    private const val KEY_AUTHORIZED_SENDERS = "authorized_senders"
+    // W4-batch-4 — Auto-Save Contacts toggle (Hybrid AppSetting AUTO_SAVE_CONTACTS). Default OFF
+    // (contact-writing is intrusive + needs a runtime permission, so it's opt-in).
+    private const val KEY_AUTO_SAVE_CONTACTS = "auto_save_contacts"
+    // W5.C — account-health gate (mirrored from GET /account-health; default healthy).
+    // W5.E — EngageBot master toggle (gates the already-recommended → next-day reschedule).
+    private const val KEY_ACCOUNT_HEALTHY = "account_healthy"
+    private const val KEY_ENGAGEBOT = "engagebot"
+    // W5.F.2b — last known *144# airtime balance (so the Portal relay reads it without dialing).
+    private const val KEY_LAST_AIRTIME_BALANCE = "last_airtime_balance"
     // W3.F — SIM routing (mirror of Hybrid's AppSetting SIM keys). Booleans.
     private const val KEY_DIAL_USSD_VIA_SIM2 = "dial_ussd_via_sim2"
     private const val KEY_SEND_SMS_VIA_SIM2 = "send_sms_via_sim2"
@@ -111,6 +125,88 @@ object SessionBridge {
 
     fun getProcessMpesa(context: Context): Boolean =
         prefs(context).getBoolean(KEY_PROCESS_MPESA, true)
+
+    // ── W4: Process-Till / Process-SiteLink toggles ───────────────────────────────────
+    // Till/Buy-Goods confirmations arrive from the same M-Pesa sender, so Till defaults ON
+    // (parity with M-Pesa — till payments are a core sale path). SiteLink (BHSL) SMS only
+    // exist once the W5 SiteLink store is live, so SiteLink defaults OFF (D-W4-1: the parser
+    // ships now but stays inert until W5). Both are AND-ed with AppState==running like M-Pesa.
+
+    fun saveProcessTill(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_PROCESS_TILL, enabled).apply()
+        Log.d(TAG, "Process-Till mirrored to native: $enabled")
+    }
+    fun getProcessTill(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_PROCESS_TILL, true)
+
+    fun saveProcessSiteLink(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_PROCESS_SITE_LINK, enabled).apply()
+        Log.d(TAG, "Process-SiteLink mirrored to native: $enabled")
+    }
+    fun getProcessSiteLink(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_PROCESS_SITE_LINK, false)
+
+    // ── W4: Authorized Senders (agent-managed; Hybrid checkValidSender extension) ──────
+    // EXTENDS the built-in sender fence (MPESA/40400/40401) so the agent can authorise extra
+    // senders whose payment SMS should be processed. Stored as a StringSet; the SMS receiver
+    // reads it. SharedPreferences StringSet must be written as a fresh set (never mutated in
+    // place), so each mutation copies, edits, and puts back.
+
+    fun getAuthorizedSenders(context: Context): Set<String> =
+        prefs(context).getStringSet(KEY_AUTHORIZED_SENDERS, emptySet())?.toSet() ?: emptySet()
+
+    /** Add a sender; returns true if newly added, false if blank or already present. */
+    fun addAuthorizedSender(context: Context, sender: String): Boolean {
+        val s = sender.trim()
+        if (s.isEmpty()) return false
+        val current = getAuthorizedSenders(context).toMutableSet()
+        val added = current.add(s)
+        if (added) prefs(context).edit().putStringSet(KEY_AUTHORIZED_SENDERS, current).apply()
+        Log.d(TAG, "Authorized sender add '$s' -> added=$added (count=${current.size})")
+        return added
+    }
+
+    fun removeAuthorizedSender(context: Context, sender: String) {
+        val current = getAuthorizedSenders(context).toMutableSet()
+        if (current.remove(sender)) {
+            prefs(context).edit().putStringSet(KEY_AUTHORIZED_SENDERS, current).apply()
+        }
+        Log.d(TAG, "Authorized sender removed '$sender' (count=${current.size})")
+    }
+
+    // ── W4-batch-4: Auto-Save Contacts toggle ──────────────────────────────────────────
+    fun saveAutoSaveContacts(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_AUTO_SAVE_CONTACTS, enabled).apply()
+        Log.d(TAG, "Auto-save-contacts mirrored to native: $enabled")
+    }
+    fun getAutoSaveContacts(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_AUTO_SAVE_CONTACTS, false)
+
+    // ── W5.C: account-health gate. Default TRUE (healthy) so a fresh/unsynced install dials
+    // normally; the Dart layer mirrors the real status from /account-health (stub = HEALTHY). ──
+    fun saveAccountHealthy(context: Context, healthy: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ACCOUNT_HEALTHY, healthy).apply()
+        Log.d(TAG, "Account-healthy mirrored to native: $healthy")
+    }
+    fun getAccountHealthy(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ACCOUNT_HEALTHY, true)
+
+    // ── W5.E: EngageBot master toggle (default ON — Hybrid engages already-recommended). ──
+    fun saveEngageBot(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ENGAGEBOT, enabled).apply()
+        Log.d(TAG, "EngageBot mirrored to native: $enabled")
+    }
+    fun getEngageBot(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ENGAGEBOT, true)
+
+    // ── W5.F.2b: last known *144# airtime balance (cache). AirtimeChecker writes it on every
+    // successful parse; the Portal's airtime_balance.sync relay READS it so a remote refresh
+    // never triggers a fresh *144# dial. Stored as a String (SharedPreferences has no double). ──
+    fun saveLastAirtimeBalance(context: Context, balance: Double) {
+        prefs(context).edit().putString(KEY_LAST_AIRTIME_BALANCE, balance.toString()).apply()
+    }
+    fun getLastAirtimeBalance(context: Context): Double? =
+        prefs(context).getString(KEY_LAST_AIRTIME_BALANCE, null)?.toDoubleOrNull()
 
     // ── W3.F: SIM routing (Hybrid AppSetting parity) ──────────────────────────────────
     // Five booleans the native dial/SMS paths read via SimSubscriptionResolver. Dart's

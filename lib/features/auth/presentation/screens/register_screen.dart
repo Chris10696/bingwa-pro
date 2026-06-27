@@ -338,7 +338,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Bingwa Pro Agent Platform Terms',
+                'Bingwa Nexus Agent Platform Terms',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               SizedBox(height: 10),

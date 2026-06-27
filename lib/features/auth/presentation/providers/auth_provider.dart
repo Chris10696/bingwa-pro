@@ -119,6 +119,7 @@ class AuthState {
     FormzSubmissionStatus? status,
     AgentProfile? agent,
     String? errorMessage,
+    bool clearError = false,
     bool? isAuthenticated,
     bool? isLoading,
     bool? isRegistering,
@@ -134,7 +135,9 @@ class AuthState {
       confirmPin: confirmPin ?? this.confirmPin,
       status: status ?? this.status,
       agent: agent ?? this.agent,
-      errorMessage: errorMessage ?? this.errorMessage,
+      // A nullable copyWith can't clear a field by passing null (null ?? old == old),
+      // which left auth errors stuck on screen forever. clearError makes clearing explicit.
+      errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       isAuthenticated: isAuthenticated ?? this.isAuthenticated,
       isLoading: isLoading ?? this.isLoading,
       isRegistering: isRegistering ?? this.isRegistering,
@@ -188,14 +191,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
   void updatePhoneNumber(String value) {
     state = state.copyWith(
       phoneNumber: PhoneNumber.dirty(value),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
   void updatePin(String value) {
     state = state.copyWith(
       pin: Pin.dirty(value),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
@@ -212,7 +215,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(
       status: FormzSubmissionStatus.inProgress,
       isLoading: true,
-      errorMessage: null,
+      clearError: true,
     );
     
     try {
@@ -267,7 +270,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         isAuthenticated: true,
         isLoading: false,
         requiresBiometricSetup: response.requiresBiometricSetup,
-        errorMessage: null,
+        clearError: true,
       );
       _ref.read(authStateProvider.notifier).markAuthenticated();
     } catch (e) {
@@ -290,28 +293,28 @@ class AuthNotifier extends StateNotifier<AuthState> {
   void updateFullName(String value) {
     state = state.copyWith(
       fullName: FullName.dirty(value),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
   void updateEmail(String value) {
     state = state.copyWith(
       email: Email.dirty(value),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
   void updateNationalId(String value) {
     state = state.copyWith(
       nationalId: NationalId.dirty(value),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
   void updateConfirmPin(String value) {
     state = state.copyWith(
       confirmPin: ConfirmPin.dirty(pin: state.pin.value, value: value),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
@@ -335,7 +338,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       status: FormzSubmissionStatus.inProgress,
       isLoading: true,
       isRegistering: true,
-      errorMessage: null,
+      clearError: true,
     );
 
     try {
@@ -387,7 +390,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(
       status: FormzSubmissionStatus.inProgress,
       isLoading: true,
-      errorMessage: null,
+      clearError: true,
     );
     
     try {
@@ -431,7 +434,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(
       status: FormzSubmissionStatus.inProgress,
       isLoading: true,
-      errorMessage: null,
+      clearError: true,
     );
     
     try {
@@ -529,7 +532,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(
       status: FormzSubmissionStatus.inProgress,
       isLoading: true,
-      errorMessage: null,
+      clearError: true,
     );
     
     try {

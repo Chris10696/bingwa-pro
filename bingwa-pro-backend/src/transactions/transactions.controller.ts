@@ -66,6 +66,7 @@ export class TransactionsController {
       mpesaTransactionId: string;
       amount: number;
       customerPhone: string;
+      customerName?: string;
       mpesaMessage?: string;
     },
   ) {
@@ -162,6 +163,13 @@ export class TransactionsController {
   @UseGuards(JwtAuthGuard)
   async getTransactionSummary(@Request() req, @Param('period') period: string) {
     return this.transactionsService.getTransactionSummary(req.user.sub, period);
+  }
+
+  // W5.A — agent commission summary (this week + today + last-7-days breakdown). BEFORE /:id.
+  @Get('commission')
+  @UseGuards(JwtAuthGuard)
+  async getCommissionSummary(@Request() req) {
+    return this.transactionsService.getCommissionSummary(req.user.sub);
   }
 
   // ===== W3.G device→backend status reporting — BEFORE /:id =====

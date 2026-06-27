@@ -24,6 +24,12 @@ export enum OfferType {
   DATA = 'DATA',
   SMS = 'SMS',
 }
+// Postgres returns DECIMAL as a string; hand TypeORM a number so JSON carries 5, not "5.00".
+const decimalToNumber = {
+  to: (value?: number | null) => value,
+  from: (value?: string | null) =>
+    value === null || value === undefined ? value : parseFloat(value),
+};
 @Entity('offers')
 export class Offer {
   @PrimaryGeneratedColumn('uuid')
@@ -47,6 +53,16 @@ export class Offer {
 
   @Column({ default: true })
   isActive: boolean;
+
+  // W5.A — agent commission as a PERCENT of the sale (e.g. 5 = 5%). Re-added (dropped in W1,
+  // deferred to W5). On SUCCESS the backend sets transaction.commission = round(amount × rate/100).
+  @Column('decimal', {
+    precision: 5,
+    scale: 2,
+    default: 0,
+    transformer: decimalToNumber,
+  })
+  commissionRate: number;
 
   // Offers belong to an agent (Q-W2-17, strict per-agent ownership).
   @Index()

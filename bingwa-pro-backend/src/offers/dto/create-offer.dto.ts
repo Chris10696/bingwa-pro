@@ -7,6 +7,8 @@ import {
   IsString,
   IsInt,
   Min,
+  Max,
+  IsNumber,
   IsBoolean,
   IsOptional,
   IsEnum,
@@ -36,4 +38,11 @@ export class CreateOfferDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  // W5.A — agent commission percent of the sale (0–100). Optional; defaults to 0.
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(100)
+  commissionRate?: number;
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- W5.H: exposes the app's external files dir so FileProvider can serve the downloaded
+     app_update.apk (saved under getExternalFilesDir(DIRECTORY_DOWNLOADS)) to the installer. -->
+<paths>
+    <external-files-path name="ext_files" path="." />
+</paths>

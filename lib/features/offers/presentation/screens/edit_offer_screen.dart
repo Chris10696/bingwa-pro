@@ -30,6 +30,7 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
   late final TextEditingController _nameCtrl;
   late final TextEditingController _ussdCtrl;
   late final TextEditingController _priceCtrl;
+  late final TextEditingController _commissionCtrl;
   late OfferType _type;
   late bool _isActive;
   bool _saving = false;
@@ -43,6 +44,10 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
     _nameCtrl = TextEditingController(text: e?.name ?? '');
     _ussdCtrl = TextEditingController(text: e?.ussdCode ?? '');
     _priceCtrl = TextEditingController(text: e != null ? '${e.price}' : '');
+    _commissionCtrl = TextEditingController(
+        text: (e != null && e.commissionRate > 0)
+            ? _trimRate(e.commissionRate)
+            : '');
     _type = e?.type ?? widget.presetType ?? OfferType.data;
     _isActive = e?.isActive ?? true;
   }
@@ -52,6 +57,7 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
     _nameCtrl.dispose();
     _ussdCtrl.dispose();
     _priceCtrl.dispose();
+    _commissionCtrl.dispose();
     super.dispose();
   }
 
@@ -130,6 +136,26 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
                 },
               ),
               const SizedBox(height: 16),
+              TextFormField(
+                controller: _commissionCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Commission rate (%)',
+                  hintText: 'e.g. 5 — your % of each sale (optional)',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (v) {
+                  final s = v?.trim() ?? '';
+                  if (s.isEmpty) return null; // optional
+                  final n = double.tryParse(s);
+                  if (n == null || n < 0 || n > 100) {
+                    return 'Enter 0–100 (or leave blank)';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
               DropdownButtonFormField<OfferType>(
                 initialValue: _type,
                 decoration: const InputDecoration(
@@ -195,6 +221,8 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
     final name = _nameCtrl.text.trim();
     final ussd = _ussdCtrl.text.trim();
     final price = int.parse(_priceCtrl.text.trim());
+    // Empty commission field → 0 (explicitly send it so clearing a rate persists).
+    final commission = double.tryParse(_commissionCtrl.text.trim()) ?? 0;
     final notifier = ref.read(offersNotifierProvider.notifier);
     setState(() => _saving = true);
     if (_isEdit) {
@@ -205,6 +233,7 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
         price: price,
         type: _type,
         isActive: _isActive,
+        commissionRate: commission,
       );
     } else {
       await notifier.createOffer(
@@ -213,6 +242,7 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
         price: price,
         type: _type,
         isActive: _isActive,
+        commissionRate: commission,
       );
     }
     if (!mounted) return;
@@ -247,6 +277,10 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
       ),
     );
   }
+
+  // Show "5" not "5.0", "5.5" not "5.50" in the prefilled commission field.
+  String _trimRate(double r) =>
+      r == r.roundToDouble() ? r.toInt().toString() : r.toString();
 
   // Mirrors backend @Matches(/^\*[\d*]+(BH|BN)[\d*]*#$/): starts *, ends #, has the
   // phone placeholder. Accepts BOTH the legacy "BH" and the rebranded "BN" token — keep

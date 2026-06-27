@@ -74,6 +74,9 @@ object SmsCreatePoster {
                 put("mpesaTransactionId", parsed.mpesaCode)
                 put("amount", parsed.amount)
                 put("customerPhone", parsed.customerPhone)
+                // W4-batch-3: the sender name from the SMS so the backend can name the
+                // get-or-created customer record (DefaultMessageExtractor "from <name>").
+                put("customerName", parsed.senderName)
                 put("mpesaMessage", parsed.rawMessage)
             }.toString()
 

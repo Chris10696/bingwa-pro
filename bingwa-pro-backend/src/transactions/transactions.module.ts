@@ -10,11 +10,13 @@ import { Agent } from '../agents/entities/agent.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { Offer } from '../offers/entities/offer.entity';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { CustomersModule } from '../customers/customers.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Transaction, Agent, Wallet, Offer]),
     SubscriptionsModule,
+    CustomersModule,
   ],
   controllers: [TransactionsController],
   providers: [TransactionsService],

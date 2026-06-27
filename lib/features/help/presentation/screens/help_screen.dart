@@ -129,7 +129,7 @@ class _HelpScreenState extends ConsumerState<HelpScreen> {
                 ListTile(
                   leading: const Icon(Icons.description, color: Color(0xFF00C853)),
                   title: const Text('User Guide'),
-                  subtitle: const Text('Learn how to use Bingwa Pro'),
+                  subtitle: const Text('Learn how to use Bingwa Nexus'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
                     // TODO: Show user guide

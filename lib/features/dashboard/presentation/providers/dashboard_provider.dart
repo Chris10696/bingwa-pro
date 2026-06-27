@@ -189,3 +189,11 @@ final dashboardBalanceProvider = Provider<WalletBalance?>((ref) {
 final ussdHealthProvider = Provider<UssdHealthCheck?>((ref) {
   return ref.watch(dashboardNotifierProvider).ussdHealth;
 });
+
+// W5.A — agent commission summary (this week total + today + last-7-days), from
+// GET /transactions/commission. autoDispose → refetches when the dashboard reopens.
+final commissionSummaryProvider = FutureProvider.autoDispose<
+    ({double total, double today, List<({String date, double amount})> daily})>(
+  (ref) async =>
+      ref.read(transactionRepositoryProvider).getCommissionSummary(),
+);

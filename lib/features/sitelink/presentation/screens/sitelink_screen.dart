@@ -1,95 +1,166 @@
 // lib/features/sitelink/presentation/screens/sitelink_screen.dart
+// W5.G.4 — the real SiteLink store screen (replaces the W4 "coming soon" placeholder).
+// Create/show the store, toggle it active, manage which offers are published, and assign
+// each offer to a device (fleet picker). The public page itself is your web deployment.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../../../core/widgets/custom_app_bar.dart';
 import '../../../../core/utils/formatters.dart';
-import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../../shared/models/sitelink_model.dart';
+import '../providers/sitelink_provider.dart';
+import 'create_sitelink_screen.dart';
+import 'add_sitelink_offer_screen.dart';
 
-// ─── Model ────────────────────────────────────────────────────────────────────
-class SiteLinkOffer {
-  final String id;
-  final String name;
-  final String value;
-  final double price;
-  final String ussdCode;
-  bool isActive;
-
-  SiteLinkOffer({
-    required this.id,
-    required this.name,
-    required this.value,
-    required this.price,
-    required this.ussdCode,
-    this.isActive = true,
-  });
-}
-
-class SiteLinkScreen extends ConsumerStatefulWidget {
+class SiteLinkScreen extends ConsumerWidget {
   const SiteLinkScreen({super.key});
 
   @override
-  ConsumerState<SiteLinkScreen> createState() => _SiteLinkScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(siteLinkProvider);
 
-class _SiteLinkScreenState extends ConsumerState<SiteLinkScreen> {
-  bool _isLinkActive = true;
-
-  // Offers list – agents can toggle/edit these
-  final List<SiteLinkOffer> _offers = [
-    SiteLinkOffer(id: '1', name: '1.5 GB – 3 Hours',      value: '1.5GB',  price: 50, ussdCode: '*180*5*2*@*1*1#'),
-    SiteLinkOffer(id: '2', name: '350 MB – 7 Days',        value: '350MB',  price: 47, ussdCode: '*180*5*2*@*2*1#'),
-    SiteLinkOffer(id: '3', name: '1 GB – 1 Hour',          value: '1GB',    price: 19, ussdCode: '*180*5*2*@*5*1#'),
-    SiteLinkOffer(id: '4', name: '250 MB – 24 Hours',      value: '250MB',  price: 20, ussdCode: '*180*5*2*@*6*1#'),
-    SiteLinkOffer(id: '5', name: '1 GB – 24 Hours',        value: '1GB/24', price: 99, ussdCode: '*180*5*2*@*7*1#'),
-    SiteLinkOffer(id: '6', name: '1.25 GB – Until Midnight', value: '1.25GB', price: 55, ussdCode: '*180*5*2*@*8*1#'),
-  ];
-
-  // ── URL helpers ─────────────────────────────────────────────────────────────
-
-  /// Converts a name like "Chris Kinyua" or "Kinyua Data" → "ChrisKinyua"
-  String _slugify(String name) =>
-      name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
-
-  String _buildUrl(String agentName) =>
-      'https://bingwahybrid.com/${_slugify(agentName)}';
-
-  // ── Build ───────────────────────────────────────────────────────────────────
-  @override
-  Widget build(BuildContext context) {
-    final agent = ref.watch(authNotifierProvider).agent;
-
-    // Use business name if set, otherwise full name, otherwise fallback
-    final displayName =
-        (agent?.businessName?.isNotEmpty == true)
-            ? agent!.businessName!
-            : (agent?.fullName.isNotEmpty == true)
-                ? agent!.fullName
-                : 'My Store';
-
-    final siteUrl = _buildUrl(displayName);
+    ref.listen(siteLinkProvider.select((s) => s.error), (_, next) {
+      if (next != null && next.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(next), backgroundColor: Colors.red),
+        );
+      }
+    });
 
     return Scaffold(
-      appBar: const CustomAppBar(title: 'SiteLink', showBackButton: true),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+      appBar: CustomAppBar(
+        title: 'SiteLink',
+        showBackButton: true,
+        actions: [
+          if (state.hasSiteLink)
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'edit') {
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) =>
+                        CreateSiteLinkScreen(existing: state.siteLink),
+                  ));
+                } else if (v == 'delete') {
+                  _confirmDelete(context, ref);
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'edit', child: Text('Edit store')),
+                PopupMenuItem(value: 'delete', child: Text('Delete store')),
+              ],
+            ),
+        ],
+      ),
+      body: state.isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : state.hasSiteLink
+              ? _StoreView(state: state)
+              : const _EmptyState(),
+    );
+  }
+
+  static void _confirmDelete(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete store?'),
+        content: const Text(
+            'Your SiteLink and its published offers will be removed. '
+            'Your offers themselves are not deleted.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref.read(siteLinkProvider.notifier).deleteSiteLink();
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Empty state (no store yet) ───────────────────────────────────────────────────────
+class _EmptyState extends ConsumerWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            _buildHeaderCard(displayName, siteUrl),
-            const SizedBox(height: 20),
-            _buildShareCard(siteUrl),
-            const SizedBox(height: 20),
-            _buildOffersSection(),
+            const Icon(Icons.storefront_outlined,
+                size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text(
+              'Create your customer-facing store',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Get a shareable link where customers pick an offer and pay. '
+              'Orders come straight to your phone.',
+              style: TextStyle(color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const CreateSiteLinkScreen(),
+              )),
+              icon: const Icon(Icons.add),
+              label: const Text('Create SiteLink'),
+            ),
           ],
         ),
       ),
     );
   }
+}
 
-  // ── Header card ─────────────────────────────────────────────────────────────
-  Widget _buildHeaderCard(String displayName, String siteUrl) {
+// ── Store view (store exists) ─────────────────────────────────────────────────────────
+class _StoreView extends ConsumerWidget {
+  final SiteLinkState state;
+  const _StoreView({required this.state});
+
+  static const _green = Color(0xFF00C853);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sl = state.siteLink!;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _headerCard(context, ref, sl),
+        const SizedBox(height: 20),
+        _offersHeader(context),
+        const SizedBox(height: 8),
+        if (state.offers.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text('No offers on your store yet.',
+                  style: TextStyle(color: Colors.grey)),
+            ),
+          )
+        else
+          ...state.offers.map((o) => _offerCard(context, ref, o)),
+      ],
+    );
+  }
+
+  Widget _headerCard(BuildContext context, WidgetRef ref, SiteLink sl) {
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -97,52 +168,12 @@ class _SiteLinkScreenState extends ConsumerState<SiteLinkScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Agent identity banner
-            Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF00C853).withOpacity(0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Text(
-                      displayName[0].toUpperCase(),
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF00C853),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        displayName,
-                        style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Text(
-                        'Your customer-facing store',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
+            Text(sl.siteName,
+                style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.bold)),
+            Text('${sl.accountType.label} · ${sl.accountNumber}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey)),
             const SizedBox(height: 16),
-
-            // URL display
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -152,137 +183,56 @@ class _SiteLinkScreenState extends ConsumerState<SiteLinkScreen> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Your SiteLink URL',
-                          style:
-                              TextStyle(fontSize: 11, color: Colors.grey),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          siteUrl,
-                          style: const TextStyle(
+                    child: Text(sl.url,
+                        style: const TextStyle(
                             color: Color(0xFF1565C0),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
+                            fontWeight: FontWeight.w500)),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.copy,
-                        size: 20, color: Color(0xFF00C853)),
+                    icon: const Icon(Icons.copy, size: 20, color: _green),
                     tooltip: 'Copy link',
-                    onPressed: () => _copyToClipboard(siteUrl),
+                    onPressed: () => _copy(context, sl.url),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.open_in_browser,
+                        size: 20, color: Colors.blue),
+                    tooltip: 'Open',
+                    onPressed: () => _open(sl.url),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.sms_outlined,
+                        size: 20, color: _green),
+                    tooltip: 'Send via SMS',
+                    onPressed: () => _shareSms(sl.url),
                   ),
                 ],
               ),
             ),
-
-            const SizedBox(height: 16),
-
-            // Activate toggle
+            const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Row(
                   children: [
-                    Icon(
-                      _isLinkActive ? Icons.link : Icons.link_off,
-                      color: _isLinkActive
-                          ? const Color(0xFF00C853)
-                          : Colors.grey,
-                    ),
+                    Icon(sl.isActive ? Icons.link : Icons.link_off,
+                        color: sl.isActive ? _green : Colors.grey),
                     const SizedBox(width: 8),
                     Text(
-                      _isLinkActive
-                          ? 'SiteLink is Active'
-                          : 'SiteLink is Inactive',
+                      sl.isActive ? 'Store is Active' : 'Store is Inactive',
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
-                        color: _isLinkActive
-                            ? const Color(0xFF00C853)
-                            : Colors.grey,
+                        color: sl.isActive ? _green : Colors.grey,
                       ),
                     ),
                   ],
                 ),
                 Switch(
-                  value: _isLinkActive,
-                  activeColor: const Color(0xFF00C853),
-                  onChanged: (v) {
-                    setState(() => _isLinkActive = v);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(
-                        v ? 'SiteLink activated' : 'SiteLink deactivated',
-                      ),
-                      backgroundColor:
-                          v ? Colors.green : Colors.orange,
-                      duration: const Duration(seconds: 2),
-                    ));
-                  },
-                ),
-              ],
-            ),
-
-            if (!_isLinkActive)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  'Toggle above to make your store visible to customers.',
-                  style: TextStyle(
-                      fontSize: 12, color: Colors.grey.shade600),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Share card ───────────────────────────────────────────────────────────────
-  Widget _buildShareCard(String siteUrl) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Share Your SiteLink',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildShareButton(
-                  icon: Icons.copy,
-                  label: 'Copy Link',
-                  color: Colors.teal,
-                  onTap: () => _copyToClipboard(siteUrl),
-                ),
-                _buildShareButton(
-                  icon: Icons.open_in_browser,
-                  label: 'Open',
-                  color: Colors.blue,
-                  onTap: () => _openInBrowser(siteUrl),
-                ),
-                _buildShareButton(
-                  icon: Icons.sms_outlined,
-                  label: 'Send SMS',
-                  color: Colors.green,
-                  onTap: () => _shareViaSms(siteUrl),
-                ),
-                _buildShareButton(
-                  icon: Icons.qr_code,
-                  label: 'QR Code',
-                  color: Colors.purple,
-                  onTap: () => _showQrPlaceholder(siteUrl),
+                  value: sl.isActive,
+                  activeColor: _green,
+                  onChanged: state.isBusy
+                      ? null
+                      : (v) =>
+                          ref.read(siteLinkProvider.notifier).setActive(v),
                 ),
               ],
             ),
@@ -292,151 +242,89 @@ class _SiteLinkScreenState extends ConsumerState<SiteLinkScreen> {
     );
   }
 
-  Widget _buildShareButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Column(
-          children: [
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: color.withOpacity(0.1),
-              child: Icon(icon, color: color, size: 20),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(fontSize: 11, color: color),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Offers section ───────────────────────────────────────────────────────────
-  Widget _buildOffersSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _offersHeader(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'SiteLink Offers',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            TextButton.icon(
-              onPressed: _showComingSoonSnackbar,
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text('Manage'),
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF00C853),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: _offers.length,
-          itemBuilder: (context, index) =>
-              _buildOfferCard(_offers[index]),
+        const Text('SiteLink Offers',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        TextButton.icon(
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => const AddSiteLinkOfferScreen(),
+          )),
+          icon: const Icon(Icons.add, size: 16),
+          label: const Text('Add Offer'),
+          style: TextButton.styleFrom(foregroundColor: _green),
         ),
       ],
     );
   }
 
-  Widget _buildOfferCard(SiteLinkOffer offer) {
+  Widget _offerCard(BuildContext context, WidgetRef ref, SiteLinkOffer o) {
+    final deviceLabel = _deviceLabel(o.relayDevice);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        offer.name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        Formatters.formatCurrency(offer.price),
-                        style: const TextStyle(
-                          color: Color(0xFF00C853),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      Text(o.name,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15)),
+                      Text(Formatters.formatCurrency(o.price.toDouble()),
+                          style: const TextStyle(
+                              color: _green, fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
-                Row(
-                  children: [
-                    Transform.scale(
-                      scale: 0.85,
-                      child: Switch(
-                        value: offer.isActive,
-                        activeColor: const Color(0xFF00C853),
-                        onChanged: (v) =>
-                            setState(() => offer.isActive = v),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.edit_outlined,
-                          size: 18, color: Colors.grey),
-                      onPressed: _showComingSoonSnackbar,
-                    ),
-                  ],
+                Switch(
+                  value: o.isActive,
+                  activeColor: _green,
+                  onChanged: state.isBusy
+                      ? null
+                      : (v) => ref
+                          .read(siteLinkProvider.notifier)
+                          .setOfferActive(o.siteLinkOfferId, v),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline,
+                      size: 20, color: Colors.grey),
+                  onPressed: state.isBusy
+                      ? null
+                      : () => ref
+                          .read(siteLinkProvider.notifier)
+                          .removeOffer(o.siteLinkOfferId),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      offer.ussdCode,
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () =>
-                        _copyToClipboard(offer.ussdCode, label: 'USSD code'),
-                    child: const Icon(Icons.copy, size: 15,
-                        color: Color(0xFF00C853)),
-                  ),
-                ],
+            const SizedBox(height: 6),
+            InkWell(
+              onTap: state.isBusy
+                  ? null
+                  : () => _showDevicePicker(context, ref, o),
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    const Icon(Icons.smartphone,
+                        size: 16, color: Colors.grey),
+                    const SizedBox(width: 6),
+                    Text('Dials on: $deviceLabel',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade700)),
+                    const Icon(Icons.arrow_drop_down,
+                        size: 18, color: Colors.grey),
+                  ],
+                ),
               ),
             ),
           ],
@@ -445,72 +333,90 @@ class _SiteLinkScreenState extends ConsumerState<SiteLinkScreen> {
     );
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
-  void _copyToClipboard(String text, {String label = 'Link'}) {
-    Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('$label copied to clipboard'),
-      backgroundColor: Colors.green,
-      duration: const Duration(seconds: 2),
-    ));
+  String _deviceLabel(String? relayDevice) {
+    if (relayDevice == null || relayDevice.isEmpty) return 'Any device';
+    final match = state.devices
+        .where((d) => d.deviceId == relayDevice)
+        .toList();
+    return match.isNotEmpty ? match.first.label : 'Assigned device';
   }
 
-  Future<void> _openInBrowser(String url) async {
+  void _showDevicePicker(BuildContext context, WidgetRef ref, SiteLinkOffer o) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Which device dials this offer?',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.devices_other),
+                title: const Text('Any device'),
+                trailing: (o.relayDevice == null || o.relayDevice!.isEmpty)
+                    ? const Icon(Icons.check, color: _green)
+                    : null,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  ref
+                      .read(siteLinkProvider.notifier)
+                      .setOfferDevice(o.offerId, null);
+                },
+              ),
+              ...state.devices.map((d) => ListTile(
+                    leading: const Icon(Icons.smartphone),
+                    title: Text(d.label),
+                    trailing: o.relayDevice == d.deviceId
+                        ? const Icon(Icons.check, color: _green)
+                        : null,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      ref
+                          .read(siteLinkProvider.notifier)
+                          .setOfferDevice(o.offerId, d.deviceId);
+                    },
+                  )),
+              if (state.devices.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'No other devices registered yet. Open the app on your '
+                    'other phones to add them.',
+                    style: TextStyle(color: Colors.grey),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _copy(BuildContext context, String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Link copied to clipboard')),
+    );
+  }
+
+  Future<void> _open(String url) async {
     final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
-  Future<void> _shareViaSms(String url) async {
+  Future<void> _shareSms(String url) async {
     final sms = Uri(
       scheme: 'sms',
-      queryParameters: {'body': 'Buy mobile data here: $url'},
+      queryParameters: {'body': 'Buy airtime & data here: $url'},
     );
     if (await canLaunchUrl(sms)) await launchUrl(sms);
-  }
-
-  void _showQrPlaceholder(String url) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('QR Code'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 180,
-              height: 180,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade200,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Center(
-                child: Text(
-                  'QR Code\nGeneration\nComing Soon',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(url,
-                style: const TextStyle(fontSize: 11, color: Colors.grey)),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showComingSoonSnackbar() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('This feature is coming soon')),
-    );
   }
 }

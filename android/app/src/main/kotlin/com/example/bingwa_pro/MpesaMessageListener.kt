@@ -61,11 +61,9 @@ class MpesaMessageListener : BroadcastReceiver() {
             Log.d(TAG, "AppState=$appState (not running) — ignoring SMS")
             return
         }
-        // GATE 1b — Process-M-Pesa settings toggle.
-        if (!SessionBridge.getProcessMpesa(appContext)) {
-            Log.d(TAG, "Process-M-Pesa toggle off — ignoring SMS")
-            return
-        }
+        // GATE 1b — the per-type processing toggle (Process M-Pesa / Till / SiteLink) is applied
+        // per message inside the loop below, since one broadcast can mix types (Hybrid keys each
+        // SmsType to its own settingKey).
         // GATE 1c — receive-SIM gate (Hybrid validateEnabledSimCards). Only process SMS that
         // arrived on a SIM the agent enabled for receiving payments. The receiving slot comes
         // from the broadcast's "subscription" extra (OEM-variable); if we can't determine it,
@@ -85,25 +83,42 @@ class MpesaMessageListener : BroadcastReceiver() {
             val body = message.messageBody ?: continue
             val sender = message.originatingAddress ?: ""
 
-            // GATE 2 — sender allowlist.
-            val fromMpesa = mpesaSenders.any { sender.contains(it, ignoreCase = true) }
-            if (!fromMpesa) {
-                Log.d(TAG, "Sender '$sender' not in M-Pesa allowlist — skipping")
+            // GATE 2 — CLASSIFY (Hybrid SmsType, first match in ordinal order SiteLink→Till→M-Pesa).
+            // Non-payment SMS (recommendation/airtime/commission) match nothing → skip.
+            val type = SmsType.classify(body)
+            if (type == null) {
+                Log.d(TAG, "Body not a payment confirmation (no SmsType match) — skipping")
                 continue
             }
-            // GATE 3 — detection (Hybrid SmsType.MPESA).
-            if (!MpesaSmsParser.isMpesaPayment(body)) {
-                Log.d(TAG, "Body not an M-Pesa payment confirmation — skipping")
+            // GATE 3 — per-type processing toggle (Hybrid SmsType.settingKey).
+            val toggleOn = when (type) {
+                SmsType.MPESA -> SessionBridge.getProcessMpesa(appContext)
+                SmsType.TILL -> SessionBridge.getProcessTill(appContext)
+                SmsType.SITE_LINK -> SessionBridge.getProcessSiteLink(appContext)
+            }
+            if (!toggleOn) {
+                Log.d(TAG, "Process-$type toggle off — skipping")
                 continue
             }
-            val parsed = MpesaSmsParser.parse(body)
+            // GATE 4 — sender allowlist. M-Pesa AND Till confirmations are sent by the M-Pesa
+            // sender, so both require the M-Pesa fence. SiteLink (BHSL) arrives from a different
+            // sender finalized in W5 with the store; until then its toggle (default OFF) is the
+            // gate, and the agent-managed Authorized Senders list (W4-batch-2) extends this.
+            if (type == SmsType.MPESA || type == SmsType.TILL) {
+                if (!isAllowedSender(appContext, sender)) {
+                    Log.d(TAG, "Sender '$sender' not in M-Pesa allowlist or authorized senders — skipping")
+                    continue
+                }
+            }
+            // GATE 5 — parse with the type's extractor.
+            val parsed = MpesaSmsParser.parseFor(type, body)
             if (parsed == null) {
-                Log.w(TAG, "M-Pesa body matched but parse failed (missing code/phone) — skipping")
+                Log.w(TAG, "$type body matched but parse failed (missing code/phone) — skipping")
                 continue
             }
 
-            Log.d(TAG, "✅ M-Pesa payment — code=${parsed.mpesaCode} amount=${parsed.amount} → /sms-create")
-            // Step 4+5 off the main thread. Backend create decides dial-or-not.
+            Log.d(TAG, "✅ $type payment — code=${parsed.mpesaCode} amount=${parsed.amount} → /sms-create")
+            // Step 4+5 off the main thread. Backend create decides dial-or-not (amount-driven match).
             CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
                 when (val outcome = SmsCreatePoster.createAndDecide(appContext, parsed)) {
                     is SmsCreatePoster.SmsCreateOutcome.Dial -> {
@@ -136,6 +151,28 @@ class MpesaMessageListener : BroadcastReceiver() {
                 }
             }
         }
+    }
+
+    /**
+     * W4 — the sender fence: the hardcoded M-Pesa senders OR an agent-authorized sender.
+     * Matches alphanumeric IDs by case-insensitive contains, and phone-number senders by
+     * last-9-digit normalisation (so a stored "0712…"/"254712…" matches a "+254712…" address).
+     */
+    private fun isAllowedSender(context: Context, sender: String): Boolean {
+        if (mpesaSenders.any { sender.contains(it, ignoreCase = true) }) return true
+        val authorized = SessionBridge.getAuthorizedSenders(context)
+        if (authorized.isEmpty()) return false
+        val senderNorm = normalizeMsisdn(sender)
+        return authorized.any { a ->
+            sender.contains(a, ignoreCase = true) ||
+                (senderNorm.length == 9 && normalizeMsisdn(a) == senderNorm)
+        }
+    }
+
+    /** Last 9 digits of a phone-like string (digits-only), for prefix-agnostic comparison. */
+    private fun normalizeMsisdn(s: String): String {
+        val d = s.filter { it.isDigit() }
+        return if (d.length >= 9) d.takeLast(9) else d
     }
 
     /**

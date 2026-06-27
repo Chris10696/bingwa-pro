@@ -107,15 +107,146 @@ class SessionBridgeService {
   /// receiver reads this (AND-ed with AppState==running) to decide whether to
   /// auto-process an incoming M-Pesa payment. Default native value is true
   /// (Hybrid parity); call this whenever the settings toggle changes / syncs.
-  Future<void> saveProcessMpesa(bool enabled) async {
+  Future<void> saveProcessMpesa(bool enabled) =>
+      _saveProcessFlag('saveProcessMpesa', enabled);
+
+  /// W4: mirror the "Process Till" / "Process SiteLink" toggles to native. Same gate shape as
+  /// M-Pesa (AND-ed with AppState==running, per type). Till defaults ON, SiteLink OFF (inert
+  /// until the W5 SiteLink store exists).
+  Future<void> saveProcessTill(bool enabled) =>
+      _saveProcessFlag('saveProcessTill', enabled);
+  Future<void> saveProcessSiteLink(bool enabled) =>
+      _saveProcessFlag('saveProcessSiteLink', enabled);
+
+  Future<void> _saveProcessFlag(String method, bool enabled) async {
     try {
-      await _channel.invokeMethod<bool>('saveProcessMpesa', <String, dynamic>{
-        'enabled': enabled,
+      await _channel.invokeMethod<bool>(method, <String, dynamic>{'enabled': enabled});
+    } on PlatformException catch (e) {
+      debugPrint('SessionBridgeService.$method failed: ${e.message}');
+    } on MissingPluginException catch (e) {
+      debugPrint('SessionBridgeService.$method channel unavailable: ${e.message}');
+    }
+  }
+
+  /// W4: current state of the three message-processing toggles, for the Settings load.
+  /// Native defaults: M-Pesa ON, Till ON, SiteLink OFF.
+  Future<bool> getProcessMpesa() => _getProcessFlag('getProcessMpesa', true);
+  Future<bool> getProcessTill() => _getProcessFlag('getProcessTill', true);
+  Future<bool> getProcessSiteLink() => _getProcessFlag('getProcessSiteLink', false);
+
+  Future<bool> _getProcessFlag(String method, bool fallback) async {
+    try {
+      final v = await _channel.invokeMethod<bool>(method);
+      return v ?? fallback;
+    } on PlatformException {
+      return fallback;
+    } on MissingPluginException {
+      return fallback;
+    }
+  }
+
+  // ── W4: Authorized Senders (agent-managed, on-device). Extends the built-in M-Pesa fence. ──
+
+  /// Current authorized senders (may be empty).
+  Future<List<String>> getAuthorizedSenders() async {
+    try {
+      final raw = await _channel.invokeMethod<List<dynamic>>('getAuthorizedSenders');
+      return raw?.map((e) => e.toString()).toList() ?? <String>[];
+    } on PlatformException catch (e) {
+      debugPrint('SessionBridgeService.getAuthorizedSenders failed: ${e.message}');
+      return <String>[];
+    } on MissingPluginException catch (e) {
+      debugPrint('SessionBridgeService.getAuthorizedSenders unavailable: ${e.message}');
+      return <String>[];
+    }
+  }
+
+  /// Add a sender; returns true if newly added, false if blank/duplicate/unavailable.
+  Future<bool> addAuthorizedSender(String sender) async {
+    try {
+      final added = await _channel
+          .invokeMethod<bool>('addAuthorizedSender', <String, dynamic>{'sender': sender});
+      return added ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('SessionBridgeService.addAuthorizedSender failed: ${e.message}');
+      return false;
+    } on MissingPluginException catch (e) {
+      debugPrint('SessionBridgeService.addAuthorizedSender unavailable: ${e.message}');
+      return false;
+    }
+  }
+
+  Future<void> removeAuthorizedSender(String sender) async {
+    try {
+      await _channel
+          .invokeMethod<bool>('removeAuthorizedSender', <String, dynamic>{'sender': sender});
+    } on PlatformException catch (e) {
+      debugPrint('SessionBridgeService.removeAuthorizedSender failed: ${e.message}');
+    } on MissingPluginException catch (e) {
+      debugPrint('SessionBridgeService.removeAuthorizedSender unavailable: ${e.message}');
+    }
+  }
+
+  // ── W4-batch-4: Auto-Save Contacts toggle (native writes the customer to the phonebook). ──
+  Future<void> saveAutoSaveContacts(bool enabled) =>
+      _saveProcessFlag('saveAutoSaveContacts', enabled);
+  Future<bool> getAutoSaveContacts() =>
+      _getProcessFlag('getAutoSaveContacts', false);
+
+  // ── W5.C/W5.D/W5.E ──
+  /// Mirror the account-standing gate to native (the dial pipeline blocks when not healthy).
+  Future<void> saveAccountHealthy(bool healthy) async {
+    try {
+      await _channel
+          .invokeMethod<bool>('saveAccountHealthy', <String, dynamic>{'healthy': healthy});
+    } on PlatformException catch (e) {
+      debugPrint('SessionBridgeService.saveAccountHealthy failed: ${e.message}');
+    } on MissingPluginException catch (e) {
+      debugPrint('SessionBridgeService.saveAccountHealthy unavailable: ${e.message}');
+    }
+  }
+
+  /// EngageBot master toggle (gates the already-recommended → next-day reschedule).
+  Future<void> saveEngageBot(bool enabled) =>
+      _saveProcessFlag('saveEngageBot', enabled);
+  Future<bool> getEngageBot() => _getProcessFlag('getEngageBot', true);
+
+  /// True when the device's automatic date & time is ON (W5.D — the engine won't dial otherwise).
+  Future<bool> isAutoTimeEnabled() => _getProcessFlag('isAutoTimeEnabled', true);
+
+  // ── W4-batch-5: Auto-Reply templates (on-device store; one per AutoReplyType). ──
+  /// Returns [{type, message, isActive}] for all six auto-reply types.
+  Future<List<Map<String, dynamic>>> getAutoReplies() async {
+    try {
+      final raw = await _channel.invokeMethod<List<dynamic>>('getAutoReplies');
+      return raw
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
+              .toList() ??
+          <Map<String, dynamic>>[];
+    } on PlatformException catch (e) {
+      debugPrint('SessionBridgeService.getAutoReplies failed: ${e.message}');
+      return <Map<String, dynamic>>[];
+    } on MissingPluginException catch (e) {
+      debugPrint('SessionBridgeService.getAutoReplies unavailable: ${e.message}');
+      return <Map<String, dynamic>>[];
+    }
+  }
+
+  Future<void> saveAutoReply({
+    required String type,
+    required String message,
+    required bool isActive,
+  }) async {
+    try {
+      await _channel.invokeMethod<bool>('saveAutoReply', <String, dynamic>{
+        'type': type,
+        'message': message,
+        'isActive': isActive,
       });
     } on PlatformException catch (e) {
-      debugPrint('SessionBridgeService.saveProcessMpesa failed: ${e.message}');
+      debugPrint('SessionBridgeService.saveAutoReply failed: ${e.message}');
     } on MissingPluginException catch (e) {
-      debugPrint('SessionBridgeService.saveProcessMpesa channel unavailable: ${e.message}');
+      debugPrint('SessionBridgeService.saveAutoReply unavailable: ${e.message}');
     }
   }
 
