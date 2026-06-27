@@ -45,6 +45,12 @@ object SessionBridge {
     // W4-batch-4 — Auto-Save Contacts toggle (Hybrid AppSetting AUTO_SAVE_CONTACTS). Default OFF
     // (contact-writing is intrusive + needs a runtime permission, so it's opt-in).
     private const val KEY_AUTO_SAVE_CONTACTS = "auto_save_contacts"
+    // W5.C — account-health gate (mirrored from GET /account-health; default healthy).
+    // W5.E — EngageBot master toggle (gates the already-recommended → next-day reschedule).
+    private const val KEY_ACCOUNT_HEALTHY = "account_healthy"
+    private const val KEY_ENGAGEBOT = "engagebot"
+    // W5.F.2b — last known *144# airtime balance (so the Portal relay reads it without dialing).
+    private const val KEY_LAST_AIRTIME_BALANCE = "last_airtime_balance"
     // W3.F — SIM routing (mirror of Hybrid's AppSetting SIM keys). Booleans.
     private const val KEY_DIAL_USSD_VIA_SIM2 = "dial_ussd_via_sim2"
     private const val KEY_SEND_SMS_VIA_SIM2 = "send_sms_via_sim2"
@@ -175,6 +181,32 @@ object SessionBridge {
     }
     fun getAutoSaveContacts(context: Context): Boolean =
         prefs(context).getBoolean(KEY_AUTO_SAVE_CONTACTS, false)
+
+    // ── W5.C: account-health gate. Default TRUE (healthy) so a fresh/unsynced install dials
+    // normally; the Dart layer mirrors the real status from /account-health (stub = HEALTHY). ──
+    fun saveAccountHealthy(context: Context, healthy: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ACCOUNT_HEALTHY, healthy).apply()
+        Log.d(TAG, "Account-healthy mirrored to native: $healthy")
+    }
+    fun getAccountHealthy(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ACCOUNT_HEALTHY, true)
+
+    // ── W5.E: EngageBot master toggle (default ON — Hybrid engages already-recommended). ──
+    fun saveEngageBot(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ENGAGEBOT, enabled).apply()
+        Log.d(TAG, "EngageBot mirrored to native: $enabled")
+    }
+    fun getEngageBot(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ENGAGEBOT, true)
+
+    // ── W5.F.2b: last known *144# airtime balance (cache). AirtimeChecker writes it on every
+    // successful parse; the Portal's airtime_balance.sync relay READS it so a remote refresh
+    // never triggers a fresh *144# dial. Stored as a String (SharedPreferences has no double). ──
+    fun saveLastAirtimeBalance(context: Context, balance: Double) {
+        prefs(context).edit().putString(KEY_LAST_AIRTIME_BALANCE, balance.toString()).apply()
+    }
+    fun getLastAirtimeBalance(context: Context): Double? =
+        prefs(context).getString(KEY_LAST_AIRTIME_BALANCE, null)?.toDoubleOrNull()
 
     // ── W3.F: SIM routing (Hybrid AppSetting parity) ──────────────────────────────────
     // Five booleans the native dial/SMS paths read via SimSubscriptionResolver. Dart's

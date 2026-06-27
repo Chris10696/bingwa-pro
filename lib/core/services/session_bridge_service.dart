@@ -193,6 +193,27 @@ class SessionBridgeService {
   Future<bool> getAutoSaveContacts() =>
       _getProcessFlag('getAutoSaveContacts', false);
 
+  // ── W5.C/W5.D/W5.E ──
+  /// Mirror the account-standing gate to native (the dial pipeline blocks when not healthy).
+  Future<void> saveAccountHealthy(bool healthy) async {
+    try {
+      await _channel
+          .invokeMethod<bool>('saveAccountHealthy', <String, dynamic>{'healthy': healthy});
+    } on PlatformException catch (e) {
+      debugPrint('SessionBridgeService.saveAccountHealthy failed: ${e.message}');
+    } on MissingPluginException catch (e) {
+      debugPrint('SessionBridgeService.saveAccountHealthy unavailable: ${e.message}');
+    }
+  }
+
+  /// EngageBot master toggle (gates the already-recommended → next-day reschedule).
+  Future<void> saveEngageBot(bool enabled) =>
+      _saveProcessFlag('saveEngageBot', enabled);
+  Future<bool> getEngageBot() => _getProcessFlag('getEngageBot', true);
+
+  /// True when the device's automatic date & time is ON (W5.D — the engine won't dial otherwise).
+  Future<bool> isAutoTimeEnabled() => _getProcessFlag('isAutoTimeEnabled', true);
+
   // ── W4-batch-5: Auto-Reply templates (on-device store; one per AutoReplyType). ──
   /// Returns [{type, message, isActive}] for all six auto-reply types.
   Future<List<Map<String, dynamic>>> getAutoReplies() async {

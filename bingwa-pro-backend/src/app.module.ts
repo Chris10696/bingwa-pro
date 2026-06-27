@@ -12,6 +12,10 @@ import { OffersModule } from './offers/offers.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { CouponsModule } from './coupons/coupons.module';
 import { CustomersModule } from './customers/customers.module';
+import { AccountHealthModule } from './account-health/account-health.module';
+import { HybridConnectModule } from './hybrid-connect/hybrid-connect.module';
+import { SitelinkModule } from './sitelink/sitelink.module';
+import { AppUpdateModule } from './app-update/app-update.module';
 import { UssdModule } from './ussd/ussd.module';
 import { MpesaModule } from './mpesa/mpesa.module';
 import { HttpModule } from '@nestjs/axios';
@@ -43,6 +47,10 @@ import { HttpModule } from '@nestjs/axios';
     SubscriptionsModule,
     CouponsModule,
     CustomersModule,
+    AccountHealthModule,
+    HybridConnectModule,
+    SitelinkModule,
+    AppUpdateModule,
     UssdModule,
     MpesaModule,
   ],

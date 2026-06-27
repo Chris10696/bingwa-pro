@@ -9,7 +9,7 @@
 // Pushed imperatively with Navigator.push from the Settings screen, so it needs no
 // go_router registration. Behaviourally identical to Hybrid: a screen opens with
 // the steps + an "Open Accessibility Settings" button. Step 4 names the Pro
-// service ("Bingwa Pro service") — IMPORTANT: this must match the label Android
+// service ("Bingwa Nexus service") — IMPORTANT: this must match the label Android
 // shows for UssdAccessibilityService, which comes from
 // @string/accessibility_service_description in the on-device build. If that
 // description differs, update this copy (or the string) so they agree.
@@ -51,7 +51,7 @@ class AccessibilityRequiredScreen extends ConsumerWidget {
                   _step(1, "Open your device's Settings app."),
                   _step(2, "Tap on 'Accessibility'."),
                   _step(3, "Tap on 'Installed apps (or services)'."),
-                  _step(4, 'Find and tap on the Bingwa Pro service.'),
+                  _step(4, 'Find and tap on the Bingwa Nexus service.'),
                   _step(5, 'Toggle the switch to enable the service.'),
                   const SizedBox(height: 28),
                   ElevatedButton(

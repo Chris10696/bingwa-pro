@@ -291,10 +291,10 @@ class _SimSetupScreenState extends ConsumerState<SimSetupScreen>
             const SizedBox(height: 8),
             Text(
               permanent
-                  ? 'Bingwa Pro needs the Phone permission to detect your SIM '
+                  ? 'Bingwa Nexus needs the Phone permission to detect your SIM '
                       'cards. It looks like it was denied — please enable it in '
                       'Settings, then come back to this screen.'
-                  : 'Bingwa Pro needs the Phone permission to detect your SIM '
+                  : 'Bingwa Nexus needs the Phone permission to detect your SIM '
                       'cards and choose which SIM dials USSDs and sends replies.',
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 14, color: Colors.black54),

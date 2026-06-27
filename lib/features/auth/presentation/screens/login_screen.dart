@@ -74,7 +74,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                             const SizedBox(height: 20),
                             const Text(
-                              'Bingwa Pro',
+                              'Bingwa Nexus',
                               style: TextStyle(
                                 fontSize: 32,
                                 fontWeight: FontWeight.bold,

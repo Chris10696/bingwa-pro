@@ -115,7 +115,7 @@ export class WalletsService {
         phoneNumber: darajaPhone,
         amount: pkg.price,
         accountReference: `BingwaPro-${agentId.slice(0, 8)}`,
-        transactionDesc: `Bingwa Pro: ${pkg.name}`,
+        transactionDesc: `Bingwa Nexus: ${pkg.name}`,
       },
       agentId,
     );

@@ -20,6 +20,7 @@
 //     instead of the inert in-memory counter
 import 'dart:async';
 import 'package:bingwa_nexus/features/auth/presentation/providers/auth_provider.dart';
+import 'package:bingwa_nexus/features/account_health/presentation/providers/account_health_provider.dart';
 import 'package:bingwa_nexus/features/dashboard/presentation/providers/processing_provider.dart';
 import 'package:bingwa_nexus/features/transactions/presentation/providers/transaction_provider.dart';
 import 'package:bingwa_nexus/features/wallet/presentation/providers/wallet_provider.dart';
@@ -980,12 +981,54 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     return ListView(
       padding: const EdgeInsets.all(15),
       children: [
+        _buildHealthBanner(),
         _buildRecentTransactions(state),
         const SizedBox(height: 20),
         _buildPerformanceChart(state),
       ],
     );
   }
+
+  // W5.C/W5.D — restriction + inaccurate-clock banners (rendered only when relevant; both
+  // also gate the dial pipeline natively, so this is the agent-facing explanation).
+  Widget _buildHealthBanner() {
+    final banners = <Widget>[];
+    final health = ref.watch(accountHealthProvider).valueOrNull;
+    if (health != null && !health.isHealthy && health.status.message.isNotEmpty) {
+      banners.add(_banner(
+          Icons.warning_amber_rounded, Colors.red, health.status.message));
+    }
+    final autoTimeOk = ref.watch(autoTimeProvider).valueOrNull;
+    if (autoTimeOk == false) {
+      banners.add(_banner(Icons.access_time, Colors.orange,
+          "Your phone's date is inaccurate. Turn on automatic date & time to keep selling."));
+    }
+    if (banners.isEmpty) return const SizedBox.shrink();
+    return Column(children: banners);
+  }
+
+  Widget _banner(IconData icon, Color color, String text) => Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(text,
+                  style: TextStyle(
+                      color: color,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500)),
+            ),
+          ],
+        ),
+      );
 
   Widget _buildTransactionsTab(DashboardState state) {
     return Center(

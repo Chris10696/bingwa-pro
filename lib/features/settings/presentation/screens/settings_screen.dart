@@ -15,6 +15,7 @@ import 'accessibility_required_screen.dart';
 import 'sim_setup_screen.dart';
 import '../../../authorized_senders/presentation/screens/authorized_senders_screen.dart';
 import '../../../customers/presentation/screens/blacklist_screen.dart';
+import '../../../app_update/presentation/screens/check_for_updates_screen.dart';
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
   @override
@@ -31,6 +32,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _processTill = true;
   bool _processSiteLink = false;
   bool _autoSaveContacts = false;
+  bool _engageBot = true;
   @override
   void initState() {
     super.initState();
@@ -45,6 +47,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final till = await bridge.getProcessTill();
     final siteLink = await bridge.getProcessSiteLink();
     final autoSave = await bridge.getAutoSaveContacts();
+    final engageBot = await bridge.getEngageBot();
 
     if (mounted) {
       setState(() {
@@ -53,6 +56,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _processTill = till;
         _processSiteLink = siteLink;
         _autoSaveContacts = autoSave;
+        _engageBot = engageBot;
       });
     }
     // W2.4D: ensure wallet balance is loaded so Processing Mode reflects state.
@@ -307,6 +311,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ]),
           const SizedBox(height: 20),
+          // W5.E: Customer Tools — EngageBot master toggle.
+          _buildSectionHeader('Customer Tools'),
+          _buildSettingsCard([
+            _buildSwitchItem(
+              icon: Icons.smart_toy_outlined,
+              title: 'EngageBot',
+              subtitle: 'Engage customers on already recommended offers',
+              value: _engageBot,
+              onChanged: (v) async {
+                setState(() => _engageBot = v);
+                await ref.read(sessionBridgeServiceProvider).saveEngageBot(v);
+              },
+            ),
+          ]),
+          const SizedBox(height: 20),
+          // W5.F: Nexus Portal — remote monitor/control via the HybridConnect socket.
+          _buildSectionHeader('Nexus Portal'),
+          _buildSettingsCard([
+            _buildSettingsItem(
+              icon: Icons.cast_connected,
+              title: 'Nexus Portal',
+              subtitle: 'View and manage transactions remotely',
+              onTap: () => context.push('/hybrid-connect'),
+            ),
+          ]),
+          const SizedBox(height: 20),
           // Processing Mode (Express / Advanced) — wired to wallet provider.
           _buildSectionHeader('Processing Mode'),
           _buildProcessingModeCard(),
@@ -405,8 +435,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               },
             ),
             _buildSettingsItem(
+              icon: Icons.system_update,
+              title: 'Check for Updates',
+              subtitle: 'Install the latest version',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const CheckForUpdatesScreen(),
+                ),
+              ),
+            ),
+            _buildSettingsItem(
               icon: Icons.info_outline,
-              title: 'About Bingwa Pro',
+              title: 'About Bingwa Nexus',
               subtitle: 'App version 1.0.0',
               onTap: () {
                 _showAboutDialog();
@@ -673,13 +713,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _showAboutDialog() {
     showAboutDialog(
       context: context,
-      applicationName: 'Bingwa Pro',
+      applicationName: 'Bingwa Nexus',
       applicationVersion: '1.0.0',
       applicationIcon: const Icon(Icons.store, size: 40, color: Color(0xFF00C853)),
       children: [
-        const Text('Bingwa Pro - Safaricom Agent Platform'),
+        const Text('Bingwa Nexus - Safaricom Agent Platform'),
         const SizedBox(height: 8),
-        const Text('© 2024 Bingwa Pro. All rights reserved.'),
+        const Text('© 2024 Bingwa Nexus. All rights reserved.'),
       ],
     );
   }

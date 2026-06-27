@@ -80,7 +80,7 @@ class BingwaProApp extends ConsumerWidget {
     final router = ref.watch(appRouterProvider);
 
     return MaterialApp.router(
-      title: 'Bingwa Pro',
+      title: 'Bingwa Nexus',
       debugShowCheckedModeBanner: false,
       theme: _buildLightTheme(),
       darkTheme: _buildDarkTheme(),

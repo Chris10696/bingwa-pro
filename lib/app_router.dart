@@ -23,6 +23,7 @@ import 'package:bingwa_nexus/features/reports/presentation/screens/reports_scree
 import 'package:bingwa_nexus/features/settings/presentation/screens/edit_profile_screen.dart';
 import 'package:bingwa_nexus/features/settings/presentation/screens/settings_screen.dart';
 import 'package:bingwa_nexus/features/sitelink/presentation/screens/sitelink_screen.dart';
+import 'package:bingwa_nexus/features/hybrid_connect/presentation/screens/hybrid_connect_screen.dart';
 import 'package:bingwa_nexus/features/transactions/presentation/screens/transaction_history_screen.dart';
 import 'package:bingwa_nexus/features/wallet/presentation/screens/redeem_coupon_screen.dart';
 import 'package:bingwa_nexus/features/wallet/presentation/screens/wallet_screen.dart';
@@ -62,6 +63,7 @@ class AppRoutes {
   static const String autoRenewals = '/auto-renewals';
   static const String siteLink = '/sitelink';
   static const String autoReply = '/auto-reply';
+  static const String hybridConnect = '/hybrid-connect';
   // Settings sub-routes
   static const String editProfile = '/settings/profile';
   // Root
@@ -365,6 +367,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => CustomTransitionPage<void>(
           key: state.pageKey,
           child: const AutoReplyScreen(),
+          transitionsBuilder: AppTransitions.slideTransition,
+          transitionDuration: const Duration(milliseconds: 350),
+        ),
+      ),
+      // W5.F.3: Nexus Connect / Portal (HybridConnect)
+      GoRoute(
+        path: AppRoutes.hybridConnect,
+        name: 'hybridConnect',
+        pageBuilder: (context, state) => CustomTransitionPage<void>(
+          key: state.pageKey,
+          child: const HybridConnectScreen(),
           transitionsBuilder: AppTransitions.slideTransition,
           transitionDuration: const Duration(milliseconds: 350),
         ),

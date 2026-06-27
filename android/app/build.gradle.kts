@@ -89,4 +89,13 @@ dependencies {
     // and fires any that came due while the phone was off (D-W3-18: match
     // Hybrid's "fire all overdues on boot"; no custom boot code required).
     implementation("androidx.work:work-runtime-ktx:2.11.2")
+
+    // ===== W5.F.2: HybridConnect/Portal socket client =====
+    // Same library Bingwa Hybrid uses (io.socket.client.IO / Socket / IO.Options.auth).
+    // The transitive org.json:json must be excluded — Android already ships org.json on
+    // the platform, and including the Maven copy triggers a "Duplicate class org.json.*"
+    // build failure (standard Android setup for this artifact).
+    implementation("io.socket:socket.io-client:2.1.0") {
+        exclude(group = "org.json", module = "json")
+    }
 }

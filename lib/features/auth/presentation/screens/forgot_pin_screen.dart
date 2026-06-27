@@ -119,6 +119,7 @@ class ForgotPinState {
     ConfirmNewPinInput? confirmNewPin,
     FormzSubmissionStatus? status,
     String? errorMessage,
+    bool clearError = false,
     bool? isLoading,
     bool? otpSent,
     bool? otpVerified,
@@ -134,7 +135,7 @@ class ForgotPinState {
       newPin: newPin ?? this.newPin,
       confirmNewPin: confirmNewPin ?? this.confirmNewPin,
       status: status ?? this.status,
-      errorMessage: errorMessage ?? this.errorMessage,
+      errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       isLoading: isLoading ?? this.isLoading,
       otpSent: otpSent ?? this.otpSent,
       otpVerified: otpVerified ?? this.otpVerified,
@@ -157,21 +158,21 @@ class ForgotPinNotifier extends StateNotifier<ForgotPinState> {
   void updatePhoneNumber(String value) {
     state = state.copyWith(
       phoneNumber: PhoneNumberInput.dirty(value),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
   void updateNationalId(String value) {
     state = state.copyWith(
       nationalId: NationalIdInput.dirty(value),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
   void updateOtp(String value) {
     state = state.copyWith(
       otp: OtpInput.dirty(value),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
@@ -183,7 +184,7 @@ class ForgotPinNotifier extends StateNotifier<ForgotPinState> {
         newPin: value,
         value: state.confirmNewPin.value,
       ),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
@@ -193,7 +194,7 @@ class ForgotPinNotifier extends StateNotifier<ForgotPinState> {
         newPin: state.newPin.value,
         value: value,
       ),
-      errorMessage: null,
+      clearError: true,
     );
   }
   
@@ -211,7 +212,7 @@ class ForgotPinNotifier extends StateNotifier<ForgotPinState> {
     state = state.copyWith(
       status: FormzSubmissionStatus.inProgress,
       isLoading: true,
-      errorMessage: null,
+      clearError: true,
     );
     
     try {
@@ -245,7 +246,7 @@ class ForgotPinNotifier extends StateNotifier<ForgotPinState> {
     state = state.copyWith(
       status: FormzSubmissionStatus.inProgress,
       isLoading: true,
-      errorMessage: null,
+      clearError: true,
     );
     
     try {
@@ -288,7 +289,7 @@ class ForgotPinNotifier extends StateNotifier<ForgotPinState> {
     state = state.copyWith(
       status: FormzSubmissionStatus.inProgress,
       isLoading: true,
-      errorMessage: null,
+      clearError: true,
     );
     
     try {

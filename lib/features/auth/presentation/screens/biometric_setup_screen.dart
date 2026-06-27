@@ -460,7 +460,7 @@ class _BiometricSetupScreenState extends ConsumerState<BiometricSetupScreen> {
           const SizedBox(height: 15),
           // Description
           const Text(
-            'Add an extra layer of security to your Bingwa Pro account. '
+            'Add an extra layer of security to your Bingwa Nexus account. '
             'Use your fingerprint or face to login quickly and securely.',
             style: TextStyle(
               fontSize: 16,
@@ -651,7 +651,7 @@ class _BiometricSetupScreenState extends ConsumerState<BiometricSetupScreen> {
               ),
               const SizedBox(height: 15),
               const Text(
-                'You can now use biometric authentication to login to your Bingwa Pro account.',
+                'You can now use biometric authentication to login to your Bingwa Nexus account.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 16,

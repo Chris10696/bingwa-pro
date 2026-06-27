@@ -43,6 +43,9 @@ class AirtimeChecker(private val context: Context) {
             val parsed = result.response?.let { parseBalance(it) }
             if (parsed != null) {
                 currentBalance = parsed
+                // W5.F.2b: cache it so the Portal's airtime_balance.sync relay can read the
+                // last balance without triggering a fresh *144# dial.
+                SessionBridge.saveLastAirtimeBalance(context, parsed)
                 Log.d(TAG, "Airtime balance: KES $parsed")
                 parsed
             } else {
