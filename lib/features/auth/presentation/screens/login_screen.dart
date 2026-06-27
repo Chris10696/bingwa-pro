@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:formz/formz.dart';
@@ -15,35 +16,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _phoneController = TextEditingController();
   final _pinController = TextEditingController();
   bool _obscurePin = true;
-
-  @override
-  void initState() {
-    super.initState();
-    // Add a listener to handle navigation when auth state changes
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (!mounted) return;
-    ref.listenManual<AuthState>(authNotifierProvider, (previous, next) {
-      if (!mounted) return;
-      if (next.errorMessage != null && previous?.errorMessage != next.errorMessage) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(next.errorMessage!),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        );
-      }
-    });
-  });
-}
+  // Auto-dismisses the inline error so it never gets "stuck" on screen.
+  Timer? _errorTimer;
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(authNotifierProvider);
     final notifier = ref.read(authNotifierProvider.notifier);
+
+    // Single error surface: the inline banner below. It clears on field edit
+    // (auth provider clearError) AND auto-dismisses after a few seconds here, so
+    // it can't linger. (Navigation on success is handled by the router.)
+    ref.listen(authNotifierProvider.select((s) => s.errorMessage), (_, next) {
+      _errorTimer?.cancel();
+      if (next != null && next.isNotEmpty) {
+        _errorTimer = Timer(const Duration(seconds: 5), () {
+          if (mounted) notifier.clearError();
+        });
+      }
+    });
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -65,12 +56,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       Center(
                         child: Column(
                           children: [
-                            Image.asset(
-                              'assets/images/logo.png',
-                              height: 80,
-                              width: 80,
-                              errorBuilder: (context, error, stackTrace) =>
-                                  const FlutterLogo(size: 80),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(18),
+                              child: Image.asset(
+                                'assets/images/logo.jpeg',
+                                height: 80,
+                                width: 80,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Container(
+                                  height: 80,
+                                  width: 80,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF00C853),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Center(
+                                    child: Text(
+                                      'BN',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 30,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
                             const SizedBox(height: 20),
                             const Text(
@@ -277,6 +289,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   void dispose() {
+    _errorTimer?.cancel();
     _phoneController.dispose();
     _pinController.dispose();
     super.dispose();

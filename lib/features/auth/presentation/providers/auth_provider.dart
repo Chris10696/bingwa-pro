@@ -187,6 +187,24 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Persist profile edits to the backend and refresh the in-memory agent so the
+  /// change is reflected app-wide immediately. Returns true on success.
+  Future<bool> updateProfile(AgentUpdateRequest request) async {
+    state = state.copyWith(isLoading: true, clearError: true);
+    try {
+      final updated = await _authRepository.updateProfile(request);
+      state = state.copyWith(isLoading: false, agent: updated);
+      return true;
+    } catch (e, st) {
+      AppLogger.e('updateProfile failed', e, st);
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: 'Failed to update profile. Please try again.',
+      );
+      return false;
+    }
+  }
+
   // Login Methods
   void updatePhoneNumber(String value) {
     state = state.copyWith(

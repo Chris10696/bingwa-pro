@@ -30,13 +30,13 @@ export class Device {
   @Column()
   deviceId: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   deviceModel: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   connectId: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   appState: string | null;
 
   @Column({ type: 'timestamp', nullable: true })

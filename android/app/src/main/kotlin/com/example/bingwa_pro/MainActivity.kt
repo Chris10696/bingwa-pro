@@ -48,6 +48,10 @@ class MainActivity : FlutterActivity() {
     // ─────────────────────────────────────────────────────────────────────────
     private val TAG = "BingwaPro"
     private val PERMISSION_REQUEST_CODE = 1001
+    // First-run permission sequencing (fixes the dialog being buried by Settings screens).
+    private var runtimePermissionsResolved = false
+    private var batteryPromptShown = false
+    private var overlayPromptShown = false
     // UssdEngine and AirtimeChecker are plain helper classes, not Android
     // components, so they are instantiated here. MpesaMessageListener is a
     // BroadcastReceiver managed entirely by Android via the manifest.
@@ -58,10 +62,44 @@ class MainActivity : FlutterActivity() {
         ussdEngine     = UssdEngine(this)
         airtimeChecker = AirtimeChecker(this)
         AutoReplyTemplates.seedIfNeeded(applicationContext) // W3.M: seed default auto-replies
-        requestAllPermissions()
-        requestBatteryOptimizationExemption()
-        requestOverlayPermission()
         startUssdService()
+        // Sequenced first-run permission flow. The runtime permission dialog must show FIRST,
+        // uninterrupted — previously the battery + overlay Settings screens were launched in
+        // the SAME onCreate and buried the dialog (the reported "redirected to settings, no
+        // permission prompt, must re-enter" bug). The special-access screens now run one at a
+        // time AFTER, via onResume → requestNextSpecialAccess(), as the user returns from each.
+        if (!requestAllPermissions()) {
+            runtimePermissionsResolved = true
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Drives the special-access chain forward each time the user returns from a screen.
+        if (runtimePermissionsResolved) requestNextSpecialAccess()
+    }
+
+    /**
+     * Launches the special-access screens (battery exemption, then overlay) ONE AT A TIME.
+     * Called only from onResume after runtime permissions are resolved, so each subsequent
+     * screen opens when the user returns from the previous one — never stacked.
+     */
+    private fun requestNextSpecialAccess() {
+        if (!batteryPromptShown && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            batteryPromptShown = true
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                requestBatteryOptimizationExemption()
+                return
+            }
+        }
+        if (!overlayPromptShown && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            overlayPromptShown = true
+            if (!Settings.canDrawOverlays(this)) {
+                requestOverlayPermission()
+                return
+            }
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -507,7 +545,8 @@ class MainActivity : FlutterActivity() {
     }
     // ────────────────────────────────────────────────────────────────────────
 
-    private fun requestAllPermissions() {
+    /** Requests missing runtime permissions. Returns true iff a dialog was actually shown. */
+    private fun requestAllPermissions(): Boolean {
         val permissions = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE)
             != PackageManager.PERMISSION_GRANTED)
@@ -527,7 +566,9 @@ class MainActivity : FlutterActivity() {
             ActivityCompat.requestPermissions(
                 this, permissions.toTypedArray(), PERMISSION_REQUEST_CODE
             )
+            return true
         }
+        return false
     }
     private fun executeUssd(ussdCode: String, phoneNumber: String, result: MethodChannel.Result) {
         CoroutineScope(Dispatchers.IO).launch {
@@ -587,6 +628,8 @@ class MainActivity : FlutterActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_REQUEST_CODE) {
+            // Runtime permissions resolved → onResume now drives the special-access chain.
+            runtimePermissionsResolved = true
             val granted = permissions.zip(grantResults.toTypedArray())
                 .filter  { it.second == PackageManager.PERMISSION_GRANTED }
                 .map     { it.first }

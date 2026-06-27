@@ -302,12 +302,19 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
         startDate = DateTime(now.year, now.month, now.day);
         endDate = now;
         break;
-      case 'week':
+      case 'yesterday':
+        final y = now.subtract(const Duration(days: 1));
+        startDate = DateTime(y.year, y.month, y.day);
+        endDate = DateTime(y.year, y.month, y.day, 23, 59, 59);
+        break;
+      case 'last7':
+      case 'week': // back-compat
         startDate = now.subtract(const Duration(days: 7));
         endDate = now;
         break;
-      case 'month':
-        startDate = DateTime(now.year, now.month, 1);
+      case 'last30':
+      case 'month': // back-compat
+        startDate = now.subtract(const Duration(days: 30));
         endDate = now;
         break;
       case 'all':

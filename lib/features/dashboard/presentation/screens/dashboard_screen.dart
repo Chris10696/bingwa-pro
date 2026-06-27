@@ -1031,28 +1031,50 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       );
 
   Widget _buildTransactionsTab(DashboardState state) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.history, size: 80, color: Colors.grey),
-          const SizedBox(height: 16),
-          const Text(
-            'Transactions Tab',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          Text('View detailed transaction list',
-              style: TextStyle(color: Colors.grey[600])),
-          const SizedBox(height: 24),
-          ElevatedButton(
+    final transactions = state.recentTransactions ?? [];
+    if (transactions.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.receipt_long, size: 72, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text('No transactions yet',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text('Your recent sales will appear here',
+                style: TextStyle(color: Colors.grey[600])),
+          ],
+        ),
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Recent Transactions',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            TextButton(
+              onPressed: () => context.push('/transaction-history'),
+              child: const Text('View All',
+                  style: TextStyle(color: Color(0xFF00C853))),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        ...transactions.map(_buildTransactionItem),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
             onPressed: () => context.push('/transaction-history'),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00C853)),
-            child: const Text('View All Transactions'),
+            icon: const Icon(Icons.history),
+            label: const Text('View all transactions'),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
   Widget _buildAnalyticsTab(DashboardState state) {
@@ -1116,53 +1138,95 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     );
   }
 
-  Widget _buildTransactionItem(TransactionDetails transaction) {
-    final isSuccess = transaction.status == TransactionStatus.success;
-    // W1: icon switch updated for new TransactionType enum
-    IconData icon;
-    switch (transaction.type) {
-      case TransactionType.quickDial:
-        icon = Icons.phone_forwarded;
-        break;
-      case TransactionType.mpesa:
-        icon = Icons.payments;
-        break;
-      case TransactionType.till:
-        icon = Icons.point_of_sale;
-        break;
-      case TransactionType.siteLink:
-        icon = Icons.link;
-        break;
-      case TransactionType.subscriptionRenewal:
-        icon = Icons.autorenew;
-        break;
-      case TransactionType.airtimeBalanceCheck:
-        icon = Icons.account_balance_wallet;
-        break;
+  // Hybrid-style status colour: green=success, red=failed/blocked, orange=pending.
+  Color _statusColor(TransactionStatus s) {
+    if (s == TransactionStatus.success) return Colors.green;
+    if (s == TransactionStatus.failed ||
+        s == TransactionStatus.failedAlreadyRecommended ||
+        s == TransactionStatus.failedOfferDeactivated ||
+        s == TransactionStatus.blocked) {
+      return Colors.red;
     }
+    if (s == TransactionStatus.scheduled ||
+        s == TransactionStatus.processing ||
+        s == TransactionStatus.rescheduled ||
+        s == TransactionStatus.paused) {
+      return Colors.orange;
+    }
+    return Colors.grey;
+  }
+
+  String _statusLabel(TransactionStatus s) {
+    if (s == TransactionStatus.failedAlreadyRecommended) return 'RECOMMENDED';
+    if (s == TransactionStatus.failedOfferDeactivated) return 'DEACTIVATED';
+    return s.name.toUpperCase();
+  }
+
+  String _typeLabel(TransactionType t) {
+    switch (t) {
+      case TransactionType.quickDial:
+        return 'Quick Dial';
+      case TransactionType.mpesa:
+        return 'M-Pesa Sale';
+      case TransactionType.till:
+        return 'Till Sale';
+      case TransactionType.siteLink:
+        return 'SiteLink Sale';
+      case TransactionType.subscriptionRenewal:
+        return 'Subscription';
+      case TransactionType.airtimeBalanceCheck:
+        return 'Balance Check';
+    }
+  }
+
+  IconData _typeIcon(TransactionType t) {
+    switch (t) {
+      case TransactionType.quickDial:
+        return Icons.phone_forwarded;
+      case TransactionType.mpesa:
+        return Icons.payments;
+      case TransactionType.till:
+        return Icons.point_of_sale;
+      case TransactionType.siteLink:
+        return Icons.link;
+      case TransactionType.subscriptionRenewal:
+        return Icons.autorenew;
+      case TransactionType.airtimeBalanceCheck:
+        return Icons.account_balance_wallet;
+    }
+  }
+
+  // Hybrid TransactionItem: offer name prominent + customer + amount + status pill.
+  Widget _buildTransactionItem(TransactionDetails transaction) {
+    final color = _statusColor(transaction.status);
+    final title =
+        (transaction.offerName != null && transaction.offerName!.isNotEmpty)
+            ? transaction.offerName!
+            : _typeLabel(transaction.type);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
         leading: Container(
-          width: 40,
-          height: 40,
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
-            color:
-                (isSuccess ? Colors.green : Colors.red).withValues(alpha: 0.1),
+            color: color.withValues(alpha: 0.12),
             shape: BoxShape.circle,
           ),
-          child: Icon(icon, color: isSuccess ? Colors.green : Colors.red),
+          child: Icon(_typeIcon(transaction.type), color: color),
         ),
         title: Text(
-          transaction.type.name.toUpperCase().replaceAll('_', ' '),
-          style: const TextStyle(fontWeight: FontWeight.w500),
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(transaction.customerPhone),
             Text(Formatters.formatDateTime(transaction.createdAt),
-                style: const TextStyle(fontSize: 12)),
+                style: const TextStyle(fontSize: 12, color: Colors.grey)),
           ],
         ),
         trailing: Column(
@@ -1171,26 +1235,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           children: [
             Text(
               Formatters.formatCurrency(transaction.amount),
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: isSuccess ? Colors.green : Colors.red,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, color: color),
             ),
             const SizedBox(height: 4),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: (isSuccess ? Colors.green : Colors.red)
-                    .withValues(alpha: 0.1),
+                color: color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                transaction.status.name,
+                _statusLabel(transaction.status),
                 style: TextStyle(
                   fontSize: 10,
-                  color: isSuccess ? Colors.green : Colors.red,
-                  fontWeight: FontWeight.w500,
+                  color: color,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),

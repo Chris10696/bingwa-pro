@@ -81,7 +81,16 @@ export class AgentsService {
     updateData: Partial<Agent>,
   ): Promise<Agent> {
     const agent = await this.findById(agentId);
-    Object.assign(agent, updateData);
+    // PARTIAL update: only apply fields the client actually sent a value for. A blind
+    // Object.assign sets omitted fields (e.g. nationalId, serialized as null) to NULL and
+    // violates the NOT NULL constraint — the cause of the profile-save 500. A partial edit
+    // must never wipe a field that wasn't being edited.
+    const provided = Object.fromEntries(
+      Object.entries(updateData).filter(
+        ([, value]) => value !== null && value !== undefined,
+      ),
+    );
+    Object.assign(agent, provided);
     return this.agentsRepository.save(agent);
   }
 

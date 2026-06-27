@@ -3,10 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/widgets/custom_app_bar.dart';
 import '../../../../core/utils/validators.dart';
-import '../../../../core/utils/logger.dart';
-import '../../../../core/security/secure_storage_manager.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
-import '../../../../shared/models/agent_model.dart';
+import '../../../../shared/models/auth_model.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key});
@@ -53,32 +51,35 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       final currentAgent = ref.read(authNotifierProvider).agent;
       if (currentAgent == null) throw Exception('Agent not found');
 
-      // Prepare update data
-      final updateData = {
-        'fullName': _nameController.text,
-        'email': _emailController.text,
-        'businessName': _businessNameController.text,
-        'location': _locationController.text,
-      };
-
-      // TODO: Call API to update profile
-      // await ref.read(agentRepositoryProvider).updateProfile(updateData);
-
-      // Simulate API call
-      await Future.delayed(const Duration(seconds: 1));
+      // Persist to the backend (PUT /agents/profile) and refresh the agent.
+      final ok =
+          await ref.read(authNotifierProvider.notifier).updateProfile(
+                AgentUpdateRequest(
+                  fullName: _nameController.text.trim(),
+                  email: _emailController.text.trim(),
+                  businessName: _businessNameController.text.trim(),
+                  location: _locationController.text.trim(),
+                ),
+              );
 
       if (!mounted) return;
 
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Profile updated successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
-
-      // Go back
-      context.pop();
+      if (ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile updated successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        context.pop();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not update profile. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
