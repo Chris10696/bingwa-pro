@@ -53,6 +53,7 @@ class OfferRepository {
     required OfferType type,
     bool? isActive,
     double? commissionRate,
+    OfferProcessingMode? processingMode,
   }) async {
     try {
       final body = {
@@ -62,6 +63,9 @@ class OfferRepository {
         'type': type.toBackendValue(),
         if (isActive != null) 'isActive': isActive,
         if (commissionRate != null) 'commissionRate': commissionRate,
+        // null = "use global default" → omit so the column stays null.
+        if (processingMode != null)
+          'processingMode': processingMode.toBackendValue(),
       };
       final response = await _dio.post(ApiConstants.offers, data: body);
       return Offer.fromJson(response.data as Map<String, dynamic>);
@@ -94,6 +98,10 @@ class OfferRepository {
     int? numberOfRetries,
     int? retryIntervalMins,
     int? ussdTimeoutMillis,
+    // Per-offer dial mode. setProcessingMode=true sends it (incl. null to clear → use
+    // global); the partial toggle-active path leaves it false so the mode isn't touched.
+    OfferProcessingMode? processingMode,
+    bool setProcessingMode = false,
   }) async {
     try {
       final body = <String, dynamic>{};
@@ -114,6 +122,9 @@ class OfferRepository {
       if (numberOfRetries != null) body['numberOfRetries'] = numberOfRetries;
       if (retryIntervalMins != null) body['retryIntervalMins'] = retryIntervalMins;
       if (ussdTimeoutMillis != null) body['ussdTimeoutMillis'] = ussdTimeoutMillis;
+      if (setProcessingMode) {
+        body['processingMode'] = processingMode?.toBackendValue();
+      }
       final response = await _dio.patch('${ApiConstants.offers}/$id', data: body);
       return Offer.fromJson(response.data as Map<String, dynamic>);
     } on DioException catch (e) {

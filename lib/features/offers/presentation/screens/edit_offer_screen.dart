@@ -32,6 +32,8 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
   late final TextEditingController _priceCtrl;
   late final TextEditingController _commissionCtrl;
   late OfferType _type;
+  // Per-offer dial mode; null = use the agent's global Settings mode.
+  OfferProcessingMode? _processingMode;
   late bool _isActive;
   bool _saving = false;
 
@@ -49,6 +51,7 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
             ? _trimRate(e.commissionRate)
             : '');
     _type = e?.type ?? widget.presetType ?? OfferType.data;
+    _processingMode = e?.processingMode;
     _isActive = e?.isActive ?? true;
   }
 
@@ -171,6 +174,28 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
                   if (v != null) setState(() => _type = v);
                 },
               ),
+              const SizedBox(height: 16),
+              // Per-offer dial mode (client request). "Use default" = the agent's
+              // global Express/Advanced setting; otherwise this offer always dials
+              // in the chosen mode.
+              DropdownButtonFormField<OfferProcessingMode?>(
+                initialValue: _processingMode,
+                decoration: const InputDecoration(
+                  labelText: 'Dial mode',
+                  helperText: 'How this offer is dialled (overrides Settings)',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                      value: null, child: Text('Use default (Settings)')),
+                  DropdownMenuItem(
+                      value: OfferProcessingMode.express, child: Text('Express')),
+                  DropdownMenuItem(
+                      value: OfferProcessingMode.advanced,
+                      child: Text('Advanced')),
+                ],
+                onChanged: (v) => setState(() => _processingMode = v),
+              ),
               const SizedBox(height: 4),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -234,6 +259,8 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
         type: _type,
         isActive: _isActive,
         commissionRate: commission,
+        processingMode: _processingMode,
+        setProcessingMode: true,
       );
     } else {
       await notifier.createOffer(
@@ -243,6 +270,7 @@ class _EditOfferScreenState extends ConsumerState<EditOfferScreen> {
         type: _type,
         isActive: _isActive,
         commissionRate: commission,
+        processingMode: _processingMode,
       );
     }
     if (!mounted) return;

@@ -191,8 +191,10 @@ class UssdExecutionService : Service() {
         // isRecurringRenewal is the renewal marker; balance checks never route through here.
         // NOTE: until W3.K/W3.L feed non-renewal transactions AND W3.I mirrors the wallet's
         // mode into SessionBridge, this resolves to Express for every current caller.
-        val advanced = !req.isRecurringRenewal &&
-            SessionBridge.getProcessingMode(applicationContext) == "advanced"
+        // Per-offer override (req.processingMode) wins when set; else the agent's global mode.
+        val effectiveMode = req.processingMode?.lowercase()
+            ?: SessionBridge.getProcessingMode(applicationContext)
+        val advanced = !req.isRecurringRenewal && effectiveMode == "advanced"
         // PreDial parity: mark PROCESSING (best-effort — the dial is what matters).
         patchStatusBestEffort(req, "PROCESSING", null, null)
 

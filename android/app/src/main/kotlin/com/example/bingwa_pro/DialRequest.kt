@@ -39,4 +39,6 @@ data class DialRequest(
     val mpesaCode: String? = null,
     val offerName: String? = null,
     val offerPrice: Int? = null,
+    // Per-offer dial-mode override ("express"/"advanced"); null = use the agent's global mode.
+    val processingMode: String? = null,
 )

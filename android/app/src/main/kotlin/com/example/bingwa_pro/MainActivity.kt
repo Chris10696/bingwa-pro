@@ -377,6 +377,8 @@ class MainActivity : FlutterActivity() {
                                 val offerName = call.argument<String>("offerName")
                                 val amount = call.argument<Int>("amount")
                                 val offerPrice = call.argument<Int>("offerPrice") ?: amount
+                                // Per-offer dial mode ("express"/"advanced"); null = global.
+                                val processingMode = call.argument<String>("processingMode")
                                 val request = DialRequest(
                                     transactionId = transactionId,
                                     ussdTemplate = ussdCode,
@@ -395,6 +397,7 @@ class MainActivity : FlutterActivity() {
                                     mpesaCode = null,
                                     offerName = offerName,
                                     offerPrice = offerPrice,
+                                    processingMode = processingMode,
                                 )
                                 UssdExecutionService.enqueue(applicationContext, request)
                                 result.success(true)

@@ -24,6 +24,14 @@ export enum OfferType {
   DATA = 'DATA',
   SMS = 'SMS',
 }
+
+// Per-offer dial-mode override (client request — a deliberate divergence from Hybrid, which
+// uses a single GLOBAL Express/Advanced toggle). NULL = use the agent's global processing
+// mode; otherwise this offer is always dialed in the chosen mode.
+export enum OfferProcessingMode {
+  EXPRESS = 'EXPRESS',
+  ADVANCED = 'ADVANCED',
+}
 // Postgres returns DECIMAL as a string; hand TypeORM a number so JSON carries 5, not "5.00".
 const decimalToNumber = {
   to: (value?: number | null) => value,
@@ -50,6 +58,10 @@ export class Offer {
   // Hybrid's category-equivalent. Replaces W1's categoryId FK (D-W2-1).
   @Column({ type: 'enum', enum: OfferType, default: OfferType.DATA })
   type: OfferType;
+
+  // Per-offer Express/Advanced override; NULL = use the agent's global processing mode.
+  @Column({ type: 'enum', enum: OfferProcessingMode, nullable: true })
+  processingMode: OfferProcessingMode | null;
 
   @Column({ default: true })
   isActive: boolean;

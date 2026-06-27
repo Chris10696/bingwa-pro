@@ -55,6 +55,32 @@ enum OfferType {
   }
 }
 
+/// Per-offer dial-mode override (client request). null = use the agent's global mode.
+enum OfferProcessingMode {
+  express,
+  advanced;
+
+  static OfferProcessingMode? fromString(String? value) {
+    switch (value?.toUpperCase()) {
+      case 'EXPRESS':
+        return OfferProcessingMode.express;
+      case 'ADVANCED':
+        return OfferProcessingMode.advanced;
+      default:
+        return null;
+    }
+  }
+
+  String toBackendValue() =>
+      this == OfferProcessingMode.advanced ? 'ADVANCED' : 'EXPRESS';
+
+  /// Native dial-path value (UssdExecutionService compares lowercase).
+  String get wire => this == OfferProcessingMode.advanced ? 'advanced' : 'express';
+
+  String get displayLabel =>
+      this == OfferProcessingMode.advanced ? 'Advanced' : 'Express';
+}
+
 class Offer {
   final String id;
   final String name;
@@ -63,6 +89,8 @@ class Offer {
   // KES whole shillings.
   final int price;
   final OfferType type;
+  // Per-offer Express/Advanced override; null = use the agent's global processing mode.
+  final OfferProcessingMode? processingMode;
   final bool isActive;
   final String agentId;
   // W5.A — agent commission as a PERCENT of the sale (0–100); 0 = no commission.
@@ -87,6 +115,7 @@ class Offer {
     required this.ussdCode,
     required this.price,
     required this.type,
+    this.processingMode,
     required this.isActive,
     required this.agentId,
     this.commissionRate = 0,
@@ -109,6 +138,8 @@ class Offer {
       ussdCode: json['ussdCode'] as String,
       price: (json['price'] as num).toInt(),
       type: OfferType.fromString(json['type'] as String? ?? 'DATA'),
+      processingMode:
+          OfferProcessingMode.fromString(json['processingMode'] as String?),
       isActive: json['isActive'] as bool? ?? true,
       agentId: json['agentId'] as String,
       commissionRate: (json['commissionRate'] as num?)?.toDouble() ?? 0,
@@ -133,6 +164,7 @@ class Offer {
         'ussdCode': ussdCode,
         'price': price,
         'type': type.toBackendValue(),
+        'processingMode': processingMode?.toBackendValue(),
         'isActive': isActive,
         'agentId': agentId,
         'commissionRate': commissionRate,
@@ -154,6 +186,7 @@ class Offer {
     String? ussdCode,
     int? price,
     OfferType? type,
+    OfferProcessingMode? processingMode,
     bool? isActive,
     String? agentId,
     double? commissionRate,
@@ -174,6 +207,7 @@ class Offer {
       ussdCode: ussdCode ?? this.ussdCode,
       price: price ?? this.price,
       type: type ?? this.type,
+      processingMode: processingMode ?? this.processingMode,
       isActive: isActive ?? this.isActive,
       agentId: agentId ?? this.agentId,
       commissionRate: commissionRate ?? this.commissionRate,

@@ -226,6 +226,8 @@ class QuickDialNotifier extends StateNotifier<QuickDialState> {
         offerName: offer.name,
         amount: amount,
         offerPrice: offer.price,
+        // Per-offer dial mode override; null = the agent's global mode.
+        processingMode: offer.processingMode?.wire,
       );
       if (!enqueued) {
         state = state.copyWith(

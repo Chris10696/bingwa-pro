@@ -77,6 +77,7 @@ class OffersNotifier extends StateNotifier<OffersState> {
     required OfferType type,
     bool isActive = true,
     double? commissionRate,
+    OfferProcessingMode? processingMode,
   }) async {
     state = state.copyWith(isMutating: true, clearError: true);
     try {
@@ -87,6 +88,7 @@ class OffersNotifier extends StateNotifier<OffersState> {
         type: type,
         isActive: isActive,
         commissionRate: commissionRate,
+        processingMode: processingMode,
       );
       state = state.copyWith(isMutating: false);
       await loadOffers();
@@ -108,6 +110,8 @@ class OffersNotifier extends StateNotifier<OffersState> {
     OfferType? type,
     bool? isActive,
     double? commissionRate,
+    OfferProcessingMode? processingMode,
+    bool setProcessingMode = false,
   }) async {
     state = state.copyWith(isMutating: true, clearError: true);
     try {
@@ -119,6 +123,8 @@ class OffersNotifier extends StateNotifier<OffersState> {
         type: type,
         isActive: isActive,
         commissionRate: commissionRate,
+        processingMode: processingMode,
+        setProcessingMode: setProcessingMode,
       );
       state = state.copyWith(isMutating: false);
       await loadOffers();

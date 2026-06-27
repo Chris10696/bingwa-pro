@@ -324,6 +324,7 @@ class SessionBridgeService {
     String? offerName,
     int? amount,
     int? offerPrice,
+    String? processingMode,
   }) async {
     try {
       final ok = await _channel.invokeMethod<bool>('enqueueQuickDial', {
@@ -334,6 +335,7 @@ class SessionBridgeService {
         'offerName': offerName,
         'amount': amount,
         'offerPrice': offerPrice,
+        'processingMode': processingMode,
       });
       return ok ?? false;
     } on PlatformException catch (e) {

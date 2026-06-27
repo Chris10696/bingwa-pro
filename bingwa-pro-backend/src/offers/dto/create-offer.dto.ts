@@ -14,7 +14,7 @@ import {
   IsEnum,
   Matches,
 } from 'class-validator';
-import { OfferType } from '../entities/offer.entity';
+import { OfferType, OfferProcessingMode } from '../entities/offer.entity';
 
 export class CreateOfferDto {
   @IsString()
@@ -34,6 +34,11 @@ export class CreateOfferDto {
 
   @IsEnum(OfferType)
   type: OfferType;
+
+  // Per-offer Express/Advanced override; omit/null = use the agent's global mode.
+  @IsEnum(OfferProcessingMode)
+  @IsOptional()
+  processingMode?: OfferProcessingMode | null;
 
   @IsBoolean()
   @IsOptional()
